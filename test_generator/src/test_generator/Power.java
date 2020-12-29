@@ -46,40 +46,40 @@ public class Power {
 		}
 
 		if(triggered.trim().length()==0) {
-			events.put(this.name+"_triggered", "Event("+cnt_in_effect+", interval);");
+			events.put(this.name+"_triggered", "Event("+cnt_in_effect+");");
 			triggered = this.name+"_triggered._happened";
 		}
 
 		if(activated.trim().length()==0) {
-			events.put(this.name+"_activated", "Event("+this.name+".state=create, interval);");
+			events.put(this.name+"_activated", "Event("+this.name+".state=create);");
 			activated = this.name+"_activated._happened";
 		}
 		if(expired.trim().length()==0) {
-			events.put(this.name+"_expired", "Event("+this.name+".state=create, interval);");
+			events.put(this.name+"_expired", "Event("+this.name+".state=create);");
 			expired = this.name+"_expired._happened";
 		}
 		if(power_suspended.trim().length()==0) {
-			events.put(this.name+"_power_suspended", "Event("+this.name+".state=inEffect, interval);");
+			events.put(this.name+"_power_suspended", "Event("+this.name+".state=inEffect);");
 			power_suspended = this.name+"_power_suspended._happened";
 		}
 		if(cnt_suspended.trim().length()==0) {
-			events.put(this.name+"_cnt_suspended", "Event("+this.name+".state=inEffect, interval);");
+			events.put(this.name+"_cnt_suspended", "Event("+this.name+".state=inEffect);");
 			cnt_suspended = this.name+"_cnt_suspended._happened";
 		}
 		if(terminated.trim().length()==0) {
-			events.put(this.name+"_terminated", "Event("+this.name+".state=inEffect, interval);");
+			events.put(this.name+"_terminated", "Event("+this.name+".state=inEffect);");
 			terminated = this.name+"_terminated._happened";
 		}
 		if(exerted.trim().length()==0) {
-			events.put(this.name+"_exerted", "Event("+this.name+".state=inEffect, interval);");
+			events.put(this.name+"_exerted", "Event("+this.name+".state=inEffect);");
 			exerted = this.name+"_exerted._happened";
 		}
 		if(power_resumed.trim().length()==0) {
-			events.put(this.name+"_power_resumed", "Event("+this.name+".state=suspension, interval);");
+			events.put(this.name+"_power_resumed", "Event("+this.name+".state=suspension);");
 			power_resumed = this.name+"_power_resumed._happened";
 		}
 		if (cnt_resumed.trim().length()==0) {
-			events.put(this.name+"_cnt_resumed", "Event("+this.name+".state=suspension, interval);");
+			events.put(this.name+"_cnt_resumed", "Event("+this.name+".state=suspension);");
 			cnt_resumed = this.name+"_cnt_resumed._happened";
 		}
 

@@ -77,10 +77,7 @@ public class Contract {
 		content += "--------------------------------------------------------------------------------------\r\n" + 
 				"-- Sample contract\r\n" + 
 				"--------------------------------------------------------------------------------------\r\n" + 
-				"MODULE main()\r\n" + 
-				"\r\n" + 
-				"\t DEFINE \n" +
-				"\t\t interval	:= 2;"+
+				"MODULE main()\r\n" + 				
 				"\r\n" + 
 				"\t VAR \n" +
 				events + obligations + powers;
