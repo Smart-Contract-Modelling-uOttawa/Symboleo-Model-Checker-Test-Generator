@@ -41,7 +41,8 @@ public class Contract {
 		//antecedent
 		used.clear();
 		while(ant_interdependent>0) {
-			Random rnd = new Random();
+			//generate with uniform distribution
+			Random rnd = new Random(System.currentTimeMillis());
 			int depender = rnd.nextInt(pow_number);
 			if(used.contains(depender))
 				continue;			
