@@ -59,28 +59,33 @@ public class Power {
 			expired = this.name+"_expired._happened";
 		}
 		if(power_suspended.trim().length()==0) {
-			events.put(this.name+"_power_suspended", "Event("+this.name+".state=inEffect);");
-			power_suspended = this.name+"_power_suspended._happened";
+			//events.put(this.name+"_power_suspended", "Event("+this.name+".state=inEffect);");
+			//power_suspended = this.name+"_power_suspended._happened";
+			power_suspended = "FALSE";
 		}
 		if(cnt_suspended.trim().length()==0) {
-			events.put(this.name+"_cnt_suspended", "Event("+this.name+".state=inEffect);");
-			cnt_suspended = this.name+"_cnt_suspended._happened";
+			//events.put(this.name+"_cnt_suspended", "Event("+this.name+".state=inEffect);");
+			//cnt_suspended = this.name+"_cnt_suspended._happened";
+			cnt_suspended = "FALSE";
 		}
 		if(terminated.trim().length()==0) {
-			events.put(this.name+"_terminated", "Event("+this.name+".state=inEffect);");
-			terminated = this.name+"_terminated._happened";
+			//events.put(this.name+"_terminated", "Event("+this.name+".state=inEffect);");
+			//terminated = this.name+"_terminated._happened";
+			terminated = "FALSE";
 		}
 		if(exerted.trim().length()==0) {
 			events.put(this.name+"_exerted", "Event("+this.name+".state=inEffect);");
 			exerted = this.name+"_exerted._happened";
 		}
 		if(power_resumed.trim().length()==0) {
-			events.put(this.name+"_power_resumed", "Event("+this.name+".state=suspension);");
-			power_resumed = this.name+"_power_resumed._happened";
+			//events.put(this.name+"_power_resumed", "Event("+this.name+".state=suspension);");
+			//power_resumed = this.name+"_power_resumed._happened";
+			power_resumed = "FALSE";
 		}
 		if (cnt_resumed.trim().length()==0) {
-			events.put(this.name+"_cnt_resumed", "Event("+this.name+".state=suspension);");
-			cnt_resumed = this.name+"_cnt_resumed._happened";
+			//events.put(this.name+"_cnt_resumed", "Event("+this.name+".state=suspension);");
+			//cnt_resumed = this.name+"_cnt_resumed._happened";
+			cnt_resumed = "FALSE";
 		}
 
 		if(antecedent.trim().length()==0) {

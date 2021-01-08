@@ -16,15 +16,15 @@ public class Test {
 	private String nuXMV_file = "";
 	private List<List<Integer>> scenarios = new ArrayList<List<Integer>>();
 	private List<String> scenario_files = new ArrayList<String>();
-	final int MAX_OBLS = 2;
+	final int MAX_OBLS = 1;
 	
 	Test() {
 		//generate test scenarios (obligation#, power#, obligation dependency rate, power dependency rate) 
-		for(int od=0; od<=100; od+=101) {
-			for(int pd=0; pd<=100; pd+=101) {
+		for(int od=0; od<=100; od+=20) {
+			for(int pd=0; pd<=100; pd+=20) {
 				for(int p=0; p<MAX_OBLS; p++) {
 					for(int o=0; o<MAX_OBLS; o++) {
-						scenarios.add(Arrays.asList((int)Math.pow(2,o),0,od,pd));
+						scenarios.add(Arrays.asList((int)Math.pow(2,3), (int)Math.pow(2,3),od,pd));
 					}
 				}
 			}
@@ -32,17 +32,19 @@ public class Test {
 	}
 	
 	public void generate() throws IOException {
+		String generic_modules = read_generic_modules();
 		for(int i=0; i<scenarios.size(); i++) {
 			Contract cnt = new Contract(scenarios.get(i).get(0), scenarios.get(i).get(1), scenarios.get(i).get(2), scenarios.get(i).get(3));		
-			String content = read_generic_modules() + cnt.get();
-			scenario_files.add(output_folder+"/test"+scenarios.get(i).get(0)+"o"+scenarios.get(i).get(1)+"p"+scenarios.get(i).get(2)+"od"+scenarios.get(i).get(3)+"pd.smv");
-			write_in_file(content, scenario_files.get(scenario_files.size()-1));			
+			String content = generic_modules + cnt.get();
+			scenario_files.add(output_folder+"/test"+scenarios.get(i).get(0)+"o"+scenarios.get(i).get(1)+"p"+scenarios.get(i).get(2)+"od"+scenarios.get(i).get(3)+"pd");
+			write_in_file(content, scenario_files.get(scenario_files.size()-1)+".smv");
 		}
 		System.out.println("Wrote in " + output_folder);
 	}
 	
 	public void run() throws IOException, InterruptedException {		
-		String source_file = output_folder+"/commands.txt";
+		String command_file1 = output_folder+"/commands1.txt";
+		String command_file2 = output_folder+"/commands2.txt";
 		String pathToCsv = output_folder+"/result.csv";	
 		String command = "";
 		FileWriter csvWriter = new FileWriter(pathToCsv);
@@ -50,9 +52,10 @@ public class Test {
 		
 		for(int sc=0; sc<scenario_files.size(); sc++) {
 			ProcessBuilder pb = new ProcessBuilder();
-			command = "read_model -i " + scenario_files.get(sc) + "; go; compute_reachable; time; quit";
-			write_in_file(command, source_file);		
-			pb.command("cmd.exe","/c", nuXMV_file + " -source " + source_file);		
+			//generate .ord file
+			command = "dynamic_var_ordering -e sift; read_model -i " + scenario_files.get(sc)+".smv" + "; time; go; time; compute_reachable; time; write_order -o " + scenario_files.get(sc)+".ord" + "; quit;";
+			write_in_file(command, command_file1);		
+			pb.command("cmd.exe","/c", nuXMV_file + " -source " + command_file1);		
 			Process ps = pb.start();
 			StringBuilder output = new StringBuilder();
 			BufferedReader reader = new BufferedReader(
@@ -64,13 +67,45 @@ public class Test {
 	        }
 	        
 	        int exitVal = ps.waitFor();
+	        float eltime=0, ttime=0;
 	        if (exitVal == 0) {
 	            System.out.println("Success!");
 	            System.out.println(output);
 	            String[] lines = output.toString().split("\n");
 	            String result = lines[lines.length-1].replace("elapse:", "").replace("seconds", "").replace("total:", "");
+	            String[] times = result.split(",");
+	            eltime = Float.parseFloat(times[0]);
+	            ttime = Float.parseFloat(times[1]);
+	        } else {
+	        	System.out.println("Error!");
+	        }
+	        
+	        //process smv file
+	        command = "read_model -i " + scenario_files.get(sc)+".smv" + "; flatten_hierarchy; encode_variables -i " + scenario_files.get(sc)+".ord" + "; time; go; time; compute_reachable; time; quit;";
+			write_in_file(command, command_file2);		
+			pb.command("cmd.exe","/c", nuXMV_file + " -source " + command_file2);		
+			ps = pb.start();
+			output = new StringBuilder();
+			reader = new BufferedReader(
+	                new InputStreamReader(ps.getInputStream()));
+			
+	        while ((line = reader.readLine()) != null) {
+	            output.append(line + "\n");
+	        }
+	        
+	        exitVal = ps.waitFor();
+	        if (exitVal == 0) {
+	            System.out.println("Success!");
+	            System.out.println(output);
+	            String[] lines = output.toString().split("\n");
+	            String result = lines[lines.length-1].replace("elapse:", "").replace("seconds", "").replace("total:", "");
+	            String[] stimes = result.split(",");
+	            float[] times = {0,0};
+	            times[0] = Float.parseFloat(stimes[0]) + eltime;
+	            times[1] = Float.parseFloat(stimes[1]) + ttime;
 	            csvWriter.append(scenarios.get(sc).get(0).toString()+",").append(scenarios.get(sc).get(1).toString()+",")
-	            .append(scenarios.get(sc).get(2).toString()+",").append(scenarios.get(sc).get(3).toString()+",").append(result).append("\n");
+	            .append(scenarios.get(sc).get(2).toString() +",").append(scenarios.get(sc).get(3).toString() +",")
+	            .append(Float.toString(times[0])+",").append(Float.toString(times[1])).append("\n");
 	        } else {
 	        	System.out.println("Error!");
 	        }

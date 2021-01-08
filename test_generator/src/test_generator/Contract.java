@@ -25,7 +25,7 @@ public class Contract {
 			pows.add(pow);
 		}
 		
-		// triggers
+		// exection of a power triggers an obligation(create obligation by a power)
 		HashSet<Integer> used = new HashSet<>();
 		while(tr_interdependent>0) {
 			Random rnd = new Random();
@@ -38,7 +38,7 @@ public class Contract {
 			tr_interdependent --;
 		}
 		
-		//antecedent
+		//violation of an obligation activates a power (antecedent becomes true)
 		used.clear();
 		while(ant_interdependent>0) {
 			//generate with uniform distribution

@@ -10,7 +10,6 @@ MODULE Event(started)
   VAR
 	triggered	: boolean;
 	state 		: {inactive, active, happened, expired};
-	performer	: {"CBEEF", "COSTCO"};
 	expired_var : boolean;
 
   ASSIGN
@@ -25,13 +24,6 @@ MODULE Event(started)
 	next(expired_var) := case
 		state=active & started	: {FALSE, TRUE};
 		TRUE	 				: FALSE;
-	esac;
-
-  ASSIGN
-	-- init(performer) := {PERFORMERS_DOMAIN};  -- Pick one non deterministically among the possible values.
-	next(performer)	:= case
-		state=active & started	: {"CBEEF", "COSTCO"};
-		TRUE	 				: performer;
 	esac;
 
   ASSIGN

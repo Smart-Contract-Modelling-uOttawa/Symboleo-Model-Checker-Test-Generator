@@ -50,8 +50,9 @@ public class Obligation {
 	public void generate() {
 		
 		if(surviving.trim().length()==0) {
-			events.put(this.name+"_surviving", "Event("+this.name+".state=inEffect);");
-			surviving = this.name+"_surviving._happened";
+			//events.put(this.name+"_surviving", "Event("+this.name+".state=inEffect);");
+			//surviving = this.name+"_surviving._happened";
+			surviving = "FALSE";
 		}
 		if(cnt_in_effect.trim().length()==0) {
 			cnt_in_effect = "TRUE";
@@ -68,8 +69,9 @@ public class Obligation {
 			triggered = this.name+"_triggered._happened";
 		}
 		if(violated.trim().length()==0) {
-			events.put(this.name+"_violated", "Event("+this.name+".state=inEffect);");
-			violated = this.name+"_violated._happened";
+			//events.put(this.name+"_violated", "Event("+this.name+".state=inEffect);");
+			//violated = this.name+"_violated._happened";
+			violated = this.name+"_fulfilled._expired";
 		}
 		if(activated.trim().length()==0) {
 			events.put(this.name+"_activated", "Event("+this.name+".state=create);");
@@ -80,28 +82,34 @@ public class Obligation {
 			expired = this.name+"_expired._happened";
 		}
 		if(power_suspended.trim().length()==0) {
-			events.put(this.name+"_power_suspended", "Event("+this.name+".state=inEffect);");
-			power_suspended = this.name+"_power_suspended._happened";
+			//events.put(this.name+"_power_suspended", "Event("+this.name+".state=inEffect);");
+			//power_suspended = this.name+"_power_suspended._happened";
+			power_suspended = "FALSE";
 		}
 		if(cnt_suspended.trim().length()==0) {
-			events.put(this.name+"_cnt_suspended", "Event("+this.name+".state=inEffect);");
-			cnt_suspended = this.name+"_cnt_suspended._happened";
+			//events.put(this.name+"_cnt_suspended", "Event("+this.name+".state=inEffect);");
+			//cnt_suspended = this.name+"_cnt_suspended._happened";
+			cnt_suspended = "FALSE";
 		}
 		if(terminated.trim().length()==0) {
-			events.put(this.name+"_terminated", "Event("+this.name+".state=inEffect);");
-			terminated = this.name+"_terminated._happened";
+			//events.put(this.name+"_terminated", "Event("+this.name+".state=inEffect);");
+			//terminated = this.name+"_terminated._happened";
+			terminated = "FALSE";
 		}
 		if(power_resumed.trim().length()==0) {
-			events.put(this.name+"_power_resumed", "Event("+this.name+".state=suspension);");
-			power_resumed = this.name+"_power_resumed._happened";
+			//events.put(this.name+"_power_resumed", "Event("+this.name+".state=suspension);");
+			//power_resumed = this.name+"_power_resumed._happened";
+			power_resumed = "FALSE";
 		}
 		if (cnt_resumed.trim().length()==0) {
-			events.put(this.name+"_cnt_resumed", "Event("+this.name+".state=suspension);");
-			cnt_resumed = this.name+"_cnt_resumed._happened";
+			//events.put(this.name+"_cnt_resumed", "Event("+this.name+".state=suspension);");
+			//cnt_resumed = this.name+"_cnt_resumed._happened";
+			cnt_resumed = "FALSE";
 		}
 		if(discharged.trim().length()==0) {
-			events.put(this.name+"_discharged", "Event("+this.name+".state=inEffect);");
-			discharged = this.name+"_discharged._happened";
+			//events.put(this.name+"_discharged", "Event("+this.name+".state=inEffect);");
+			//discharged = this.name+"_discharged._happened";
+			discharged = "FALSE";
 		}
 		if(antecedent.trim().length()==0) {
 			antecedent = "TRUE";
