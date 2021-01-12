@@ -1,7 +1,7 @@
-package test_generator;
-
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
@@ -20,8 +20,8 @@ public class Test {
 	
 	Test() {
 		//generate test scenarios (obligation#, power#, obligation dependency rate, power dependency rate) 
-		for(int od=0; od<=100; od+=20) {
-			for(int pd=0; pd<=100; pd+=20) {
+		for(int od=0; od<=100; od+=110) {
+			for(int pd=0; pd<=100; pd+=110) {
 				for(int p=0; p<MAX_OBLS; p++) {
 					for(int o=0; o<MAX_OBLS; o++) {
 						scenarios.add(Arrays.asList((int)Math.pow(2,3), (int)Math.pow(2,3),od,pd));
@@ -125,7 +125,9 @@ public class Test {
 	
 	private String read_generic_modules() throws IOException {
 		String content = "";
-		InputStream reader = Test.class.getResourceAsStream("/generic_smv_modules.txt");
+		//InputStream reader = Test.class.getResourceAsStream("/generic_smv_modules.txt");
+		File gmodule = new File("generic_smv_modules.txt");
+		InputStream reader = new FileInputStream("generic_smv_modules.txt");
 		try {
 			content = stream_to_string(reader);
 		} catch (IOException e) {
