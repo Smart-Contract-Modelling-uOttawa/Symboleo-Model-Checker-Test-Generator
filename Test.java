@@ -32,6 +32,7 @@ public class Test {
 	}
 	
 	public void generate() throws IOException {
+		System.out.println("Writting .ord files in " + output_folder);
 		String generic_modules = read_generic_modules();
 		for(int i=0; i<scenarios.size(); i++) {
 			Contract cnt = new Contract(scenarios.get(i).get(0), scenarios.get(i).get(1), scenarios.get(i).get(2), scenarios.get(i).get(3));		
@@ -45,10 +46,16 @@ public class Test {
 	public void run() throws IOException, InterruptedException {		
 		String command_file1 = output_folder+"/commands1.txt";
 		String command_file2 = output_folder+"/commands2.txt";
-		String pathToCsv = output_folder+"/result.csv";	
+		String pathToCCsv = output_folder+"/combinedresult.csv";	
+		String pathToOCsv = output_folder+"/orderresult.csv";	
+		String pathToRCsv = output_folder+"/reachresult.csv";	
 		String command = "";
-		FileWriter csvWriter = new FileWriter(pathToCsv);
-		csvWriter.append("obligation#, power#, obligation dependency%, power dependency%, elapse time, total time\n");
+		FileWriter csvCWriter = new FileWriter(pathToCCsv);
+		FileWriter csvOWriter = new FileWriter(pathToOCsv);
+		FileWriter csvRWriter = new FileWriter(pathToRCsv);
+		csvCWriter.append("obligation#, power#, obligation dependency%, power dependency%, elapse time, total time\n");
+		csvOWriter.append("obligation#, power#, obligation dependency%, power dependency%, elapse time, total time\n");
+		csvRWriter.append("obligation#, power#, obligation dependency%, power dependency%, elapse time, total time\n");
 		
 		for(int sc=0; sc<scenario_files.size(); sc++) {
 			ProcessBuilder pb = new ProcessBuilder();
@@ -76,6 +83,12 @@ public class Test {
 	            String[] times = result.split(",");
 	            eltime = Float.parseFloat(times[0]);
 	            ttime = Float.parseFloat(times[1]);
+				
+				//record ordering time
+				csvOWriter.append(scenarios.get(sc).get(0).toString()+",").append(scenarios.get(sc).get(1).toString()+",")
+	            .append(scenarios.get(sc).get(2).toString() +",").append(scenarios.get(sc).get(3).toString() +",")
+	            .append(times[0]+",").append(times[1]).append("\n");
+				
 	        } else {
 	        	System.out.println("Error!");
 	        }
@@ -101,17 +114,28 @@ public class Test {
 	            String result = lines[lines.length-1].replace("elapse:", "").replace("seconds", "").replace("total:", "");
 	            String[] stimes = result.split(",");
 	            float[] times = {0,0};
+				
+				//record reach computing execution time
+				csvRWriter.append(scenarios.get(sc).get(0).toString()+",").append(scenarios.get(sc).get(1).toString()+",")
+	            .append(scenarios.get(sc).get(2).toString() +",").append(scenarios.get(sc).get(3).toString() +",")
+	            .append(stimes[0]+",").append(stimes[1]).append("\n");
+				
+				//record total time(ordering and reach computing time)
 	            times[0] = Float.parseFloat(stimes[0]) + eltime;
 	            times[1] = Float.parseFloat(stimes[1]) + ttime;
-	            csvWriter.append(scenarios.get(sc).get(0).toString()+",").append(scenarios.get(sc).get(1).toString()+",")
+	            csvCWriter.append(scenarios.get(sc).get(0).toString()+",").append(scenarios.get(sc).get(1).toString()+",")
 	            .append(scenarios.get(sc).get(2).toString() +",").append(scenarios.get(sc).get(3).toString() +",")
 	            .append(Float.toString(times[0])+",").append(Float.toString(times[1])).append("\n");
 	        } else {
 	        	System.out.println("Error!");
 	        }
 		}
-		csvWriter.flush();
-		csvWriter.close();
+		csvCWriter.flush();
+		csvOWriter.flush();
+		csvRWriter.flush();
+		csvCWriter.close();
+		csvOWriter.close();
+		csvRWriter.close();
 		System.exit(0);
 	}
 	
