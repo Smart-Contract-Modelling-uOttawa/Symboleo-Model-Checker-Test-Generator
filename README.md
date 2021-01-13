@@ -14,4 +14,8 @@ This is an Eclipse project that generates performance benchmarks and evaluates t
   ```sh
   java Main
   ```
+  For running the program in background:
+  ```sh
+  nohub java Main &
+  ```
   Find outputs in 'result' folder.
