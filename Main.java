@@ -1,16 +1,18 @@
 import java.io.IOException;
+import java.io.File;
 
 public class Main {
 
 	public static void main(String[] args) throws IOException, InterruptedException {
 		// TODO Auto-generated method stub
 		Test test = new Test();
-		if(args.length != 2) {
-			System.out.println("Parameters should be <nuXmv.exe path> <output folder path>");
-			System.exit(0);
+		test.set_nuxmv_file("nuXmv");
+		// make directory
+		File output = new File("result");
+		if(!output.exists()){
+			output.mkdirs();
 		}
-		test.set_nuxmv_file(args[0]);
-		test.set_output_folder(args[1]);
+		test.set_output_folder("result");
 		test.generate();
 		test.run();
 	}
