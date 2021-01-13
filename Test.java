@@ -62,7 +62,7 @@ public class Test {
 			//generate .ord file
 			command = "dynamic_var_ordering -e sift; read_model -i " + scenario_files.get(sc)+".smv" + "; time; go; time; compute_reachable; time; write_order -o " + scenario_files.get(sc)+".ord" + "; quit;";
 			write_in_file(command, command_file1);		
-			pb.command("cmd.exe","/c", nuXMV_file + " -source " + command_file1);		
+			pb.command("bash", "-c", "./"+nuXMV_file + " -source " + command_file1);		
 			Process ps = pb.start();
 			StringBuilder output = new StringBuilder();
 			BufferedReader reader = new BufferedReader(
@@ -96,7 +96,7 @@ public class Test {
 	        //process smv file
 	        command = "read_model -i " + scenario_files.get(sc)+".smv" + "; flatten_hierarchy; encode_variables -i " + scenario_files.get(sc)+".ord" + "; time; go; time; compute_reachable; time; quit;";
 			write_in_file(command, command_file2);		
-			pb.command("cmd.exe","/c", nuXMV_file + " -source " + command_file2);		
+			pb.command("bash", "-c", "./"+nuXMV_file + " -source " + command_file2);		
 			ps = pb.start();
 			output = new StringBuilder();
 			reader = new BufferedReader(
