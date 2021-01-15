@@ -46,7 +46,7 @@ public class Contract {
 				continue;			
 			int dependee = rnd.nextInt(obl_number);
 			used.add(depender);
-			pows.get(depender).set_antecedent("obl"+ dependee +".state=violation");
+			pows.get(depender).set_trigger("obl"+ dependee +".state=violation");
 			ant_interdependent --;
 		}
 		
