@@ -24,7 +24,7 @@ public class Test {
 			for(int pd=0; pd<=100; pd+=110) {
 				for(int p=0; p<MAX_OBLS; p++) {
 					for(int o=0; o<MAX_OBLS; o++) {
-						scenarios.add(Arrays.asList((int)Math.pow(2,3), (int)Math.pow(2,3),od,pd));
+						scenarios.add(Arrays.asList((int)Math.pow(2,o), (int)Math.pow(2,p),od,pd));
 					}
 				}
 			}
