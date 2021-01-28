@@ -8,8 +8,8 @@ public class Contract {
 	ArrayList<Power> pows = new ArrayList<>();
 	
 	public Contract(int obl_number, int pow_number, int trigger_intdep_percent, int ant_intdep_percent) {
-		int tr_interdependent = (obl_number * trigger_intdep_percent) /100;
-		int ant_interdependent = (pow_number * ant_intdep_percent) /100;
+		int tr_interdependent = (int)Math.ceil((obl_number * trigger_intdep_percent) /100);
+		int ant_interdependent = (int)Math.ceil((pow_number * ant_intdep_percent) /100);
 		for(int number = 0; number<obl_number; number++) {
 			Obligation obl;
 			obl = new Obligation("obl"+number);
