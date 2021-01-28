@@ -1,5 +1,5 @@
 # Symboleo-Model-Checker-Test-Generator
-This is an Java tool that generates performance benchmarks and evaluates the execution time of the SymboleoPC tool using various configurations. The test generator tool allows users to configure the number of obligations and powers, and the rate of interdependency among these terms.
+This is an Java tool that generates performance benchmarks and evaluates the execution time of the <a href="https://github.com/Smart-Contract-Modelling-uOttawa/Symboleo-Model-Checker">Symboleo Model Checker (SymboleoPC)</a> tool using various configurations. The test generator tool allows users to configure the number of obligations and powers, and the rate of interdependency among these terms.
 ##### Install Spot
 Spot is a tool that randomly generates LTL properties. Follow <a href="https://spot.lrde.epita.fr/install.html"> Spot Installation Instruction</a> to install the Spot in Linux.
 
