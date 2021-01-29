@@ -16,39 +16,42 @@ public class Test {
 	private String nuXMV_file = "";
 	private List<List<Integer>> scenarios = new ArrayList<List<Integer>>();
 	private List<String> scenario_files = new ArrayList<String>();
-	private int prop_number;
-	final int OBL_DEP = 14;
-	final int POW_DEP = 22;
-	
-	Test(int max_obls, int max_pows, int pnum) {
-		prop_number = pnum;
+	private int lprop_number;
+	private int cprop_number;
+	final int OBL_DEP = 0;
+	final int POW_DEP = 0;
+
+	Test(int max_obls, int max_pows, int lpnum, int cpnum) {
+		lprop_number = lpnum;
+		cprop_number = cpnum;
 		//generate test scenarios (obligation#, power#, obligation dependency rate, power dependency rate) 
-		for(int p=0; p<max_obls; p++) {
-			for(int o=0; o<max_pows; o++) {
+		for(int p=0; p<=max_obls; p++) {
+			for(int o=0; o<=max_pows; o++) {
 				scenarios.add(Arrays.asList((int)Math.pow(2,o), (int)Math.pow(2,p),OBL_DEP,POW_DEP));
 			}
 		}
 	}
-	
+
 	public void generate() throws IOException, InterruptedException {
 		System.out.println("Writting .ord files in " + output_folder);
 		String generic_modules = read_generic_modules();
 		for(int i=0; i<scenarios.size(); i++) {
-			Contract cnt = new Contract(scenarios.get(i).get(0), scenarios.get(i).get(1), scenarios.get(i).get(2), scenarios.get(i).get(3));		
-			LtlGenerator ltl_gen = new LtlGenerator(scenarios.get(i).get(0), scenarios.get(i).get(1), prop_number);
-			System.out.println(ltl_gen.get());
-			String content = generic_modules + cnt.get() + ltl_gen.get();
+			Contract cnt = new Contract(scenarios.get(i).get(0), scenarios.get(i).get(1), scenarios.get(i).get(2), scenarios.get(i).get(3));
+			LtlGenerator ltl_gen = new LtlGenerator(scenarios.get(i).get(0), scenarios.get(i).get(1), lprop_number);
+			CtlGenerator ctl_gen = new CtlGenerator(scenarios.get(i).get(0), scenarios.get(i).get(1), cprop_number);
+			String content = generic_modules + cnt.get() + ltl_gen.get() + ctl_gen.get();
 			scenario_files.add(output_folder+"/test"+scenarios.get(i).get(0)+"o"+scenarios.get(i).get(1)+"p"+scenarios.get(i).get(2)+"od"+scenarios.get(i).get(3)+"pd");
 			write_in_file(content, scenario_files.get(scenario_files.size()-1)+".smv");
+			Thread.sleep(200);
 		}
 		System.out.println("Wrote in " + output_folder);
 	}
-	
-	public void run() throws IOException, InterruptedException {		
+
+	public void run() throws IOException, InterruptedException {
 		String command_file1 = output_folder+"/commands1.txt";
 		String command_file2 = output_folder+"/commands2.txt";
-		String pathToCCsv = output_folder+"/combinedresult.csv";	
-		String pathToOCsv = output_folder+"/orderresult.csv";	
+		String pathToCCsv = output_folder+"/combinedresult.csv";
+		String pathToOCsv = output_folder+"/orderresult.csv";
 		String pathToRCsv = output_folder+"/reachresult.csv";	
 		String command = "";
 		FileWriter csvCWriter = new FileWriter(pathToCCsv);
