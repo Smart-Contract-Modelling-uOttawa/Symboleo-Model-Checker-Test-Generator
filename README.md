@@ -15,7 +15,7 @@ Spot is a tool that randomly generates LTL properties. Follow <a href="https://s
   ```
   Run the program:
   ```sh
-  java Main <maximum number of obligations> <maximum number of powers> <number of LTL properties> 
+  java Main <maximum number of obligations> <maximum number of powers> <number of LTL properties> <number of CTL properties>
   ```
   For running the program in background:
   ```sh
