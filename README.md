@@ -21,6 +21,6 @@ Spot is a tool that randomly generates LTL properties. Follow <a href="https://s
   ```sh
   nohup java Main <number1> <number2> <number of LTL properties> <number of CTL properties> &
   ```
-  it generates a set of scenarios with 0 to 2^number1 obligations and 0 to 2^number1 powers with the mentioned properties. 
+  it generates a set of scenarios with 0 to 2^number1 obligations and 0 to 2^number2 powers with the mentioned properties. 
   
   Find outputs in 'result' folder.
