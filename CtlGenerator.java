@@ -16,7 +16,7 @@ public class CtlGenerator {
 		prop_number = propnum;	
 		if(propnum <= 0)	
 			return;	
-		atoms = "randltl -n" + prop_number + " -p --seed=4 --ltl-priorities 'W=0,M=0,R=0' -o " + tmp_file + " ";	
+		atoms = "randltl -n" + prop_number + " -p --seed=4 --ltl-priorities 'W=0,M=0,R=0,false=0,true=0,not=2,and=3,or=2,implies=1,F=1,G=2,X=0,U=1' --tree-size=9 -o " + tmp_file + " ";		
 		//generate obligation atoms 	
 		for(int o=0; o<obl_num; o++) {	
 			atoms += "obl"+o+".state=create ";	
@@ -74,13 +74,13 @@ public class CtlGenerator {
 					prop += "AG(" + words[i];	
 			}	
 			prop = "\t\tCTLSPEC NAME CTL" + number + " := " + prop;	
-			all_props += prop +"\n\n";	
+			all_props += ReplaceU(prop) +"\n\n";	
 			number ++;	
 		}
 		reader.close();
 	}
 	
-	static public String ReplaceU(String content) {
+	private String ReplaceU(String content) {
 		int occurance_num = content.split(" U ").length -1;
 		if (occurance_num <= 0)
 			return content;
@@ -98,7 +98,7 @@ public class CtlGenerator {
 					closed_parenthesis --;
 				l_cursor--;
 			}
-			while( closed_parenthesis > 0);
+			while( closed_parenthesis > 0 && l_cursor > 0);
 			
 			//find right index		
 			int r_cursor = u_index + 3;
@@ -110,7 +110,7 @@ public class CtlGenerator {
 					opened_parenthesis --;
 				r_cursor++;
 			}
-			while( opened_parenthesis > 0 );
+			while( opened_parenthesis > 0 && r_cursor < content.length());
 			
 			//Add A or E operator
 			Random rand = new Random();
