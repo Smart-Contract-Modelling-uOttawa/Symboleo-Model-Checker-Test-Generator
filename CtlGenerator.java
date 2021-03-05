@@ -5,14 +5,14 @@ import java.io.IOException;
 import java.util.Random;
 import java.util.Scanner;
 
-public class CltGenerator {
+public class CtlGenerator {
 	private int obl_num, pow_num;
 	private int prop_number;
 	private String tmp_file = "tmp_file.ctl";
 	private String all_props = "";
 	private String atoms = "";
 	
-	CltGenerator(int onum, int pownum, int propnum) throws IOException, InterruptedException{
+	CtlGenerator(int onum, int pownum, int propnum) throws IOException, InterruptedException{
 		obl_num = onum;
 		pow_num = pownum;
 		prop_number = propnum;
