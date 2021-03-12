@@ -16,7 +16,7 @@ public class CtlGenerator {
 		prop_number = propnum;	
 		if(propnum <= 0)	
 			return;	
-		atoms = "randltl -n" + prop_number + " -p --seed=4 --ltl-priorities 'W=0,M=0,R=0,false=0,true=0,not=2,and=3,or=2,implies=1,F=1,G=1,X=0,U=0' --tree-size=7 -o " + tmp_file + " ";		
+		atoms = "randltl -n" + prop_number + " -p --seed=4 --ltl-priorities 'false=0,true=0,not=2,and=4,or=1,xor=0,implies=2,equiv=0,W=0,M=0,R=0,X=0,U=0,F=3,G=2' --tree-size=7 -o " + tmp_file + " ";		
 		//generate obligation atoms 	
 		for(int o=0; o<obl_num; o++) {	
 			atoms += "obl"+o+".state=create ";	
