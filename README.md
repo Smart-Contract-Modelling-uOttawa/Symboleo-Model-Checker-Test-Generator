@@ -2,7 +2,15 @@
 This is an Java tool that generates performance benchmarks and evaluates the execution time of the <a href="https://github.com/Smart-Contract-Modelling-uOttawa/Symboleo-Model-Checker">Symboleo Model Checker (SymboleoPC)</a> tool using various configurations. The test generator tool allows users to configure the number of obligations and powers, and the rate of interdependency among these terms.
 ##### Install Spot
 Spot is a tool that randomly generates LTL properties. Follow <a href="https://spot.lrde.epita.fr/install.html"> Spot Installation Instruction</a> to install the Spot in Linux.
-
+##### Before Run
+   Verify the permissions of the nuXmv file by running the ls -l command.    It will display the file permissions along with other details:
+   ```sh
+   ls -l nuXmv
+   ```
+   If the file does not have the executable permission, you can grant it using the chmod command:
+    ```sh
+   sudo chmod +x nuXmv
+   ```
 ##### Compile and Run on Linux
   Ensure JavaSDK is installed:
   ```sh
