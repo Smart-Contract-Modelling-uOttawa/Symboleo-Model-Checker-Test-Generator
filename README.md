@@ -8,8 +8,8 @@ Spot is a tool that randomly generates LTL properties. Follow <a href="https://s
    ls -l nuXmv
    ```
    If the file does not have the executable permission, you can grant it using the chmod command:
-    ```sh
-   sudo chmod +x nuXmv
+   ```sh
+     sudo chmod +x nuXmv
    ```
 ##### Compile and Run on Linux
   Ensure JavaSDK is installed:
