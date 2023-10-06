@@ -85,6 +85,7 @@ public class CtlGenerator {
 			number++;
 		}
 		reader.close();
+		infile.delete();
 	}
 
 	public String get() {

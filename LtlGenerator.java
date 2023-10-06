@@ -12,6 +12,7 @@ public class LtlGenerator {
 	private String atoms = "";
 
 	LtlGenerator(int onum, int pownum, int propnum) throws IOException, InterruptedException {
+		atoms = "";
 		obl_num = onum;
 		pow_num = pownum;
 		prop_number = propnum;
@@ -59,6 +60,7 @@ public class LtlGenerator {
 			all_props += prop + "\n\n";
 			number++;
 		}
+		infile.delete();
 	}
 
 	public String get() {
