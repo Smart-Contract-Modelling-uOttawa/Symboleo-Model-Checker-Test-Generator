@@ -1,0 +1,2758 @@
+MODULE Timer(start)
+ VAR active1  : boolean;
+     expired1 : boolean;
+ ASSIGN
+   init(active1) := start;
+   next(active1) := (active1 | start) ? TRUE : active1;
+   init(expired1) :=  active1 ? {TRUE,FALSE} : FALSE;
+   next(expired1) :=  case
+           active1 & !expired1 : {TRUE,FALSE};
+           expired1           : TRUE;
+           TRUE              : FALSE;
+       esac;
+
+MODULE Event(start)
+ DEFINE 
+ 		_active := (state = active);
+ 		_inactive := (state = inactive);
+        _happened := (state = happened);
+        _expired  := (state = expired);
+ VAR triggered : boolean;
+         timer : Timer(start & !_happened & !_expired);
+         state : {inactive, active, happened, expired};
+		 performer	: {"Customer", "Store"};
+
+ ASSIGN
+	next(performer)	:= case
+		state=active & start	: {"Customer", "Store"};
+		TRUE	 				: performer;
+	esac;
+ ASSIGN
+  init(triggered) := FALSE;
+  next(triggered) := (state=active & start) ? {FALSE,TRUE} : FALSE;
+  init(state)     := inactive;
+  next(state)     := case
+    state=inactive & start                          : active;
+    state=active & start & triggered &
+							timer.active1 : happened;
+	state=active & start & timer.expired1 : expired;
+    TRUE                                            : state;
+  esac;
+
+--------------------------------------------------------------------------------------
+-- 'name' is party name
+-- 'removeL/R/P' releases liability, righHolder or performer position of a party
+-- 'addL/R/P' adds liability, righHolder or performer position to a party
+--------------------------------------------------------------------------------------
+MODULE Party(norm, name, removeL, addL, removeR, addR, removeP, addP)
+  DEFINE
+	_name 			:= name;
+	_norm			:= norm;
+	_is_performer	:= p_state=P;
+	_is_liable		:= l_state=L;
+	_is_rightHolder	:= r_state=R;
+
+  VAR
+	l_state	: {Init, L};
+	r_state	: {Init, R};
+	p_state	: {Init, P};
+
+  ASSIGN
+	init(l_state) := Init;
+	next(l_state)	:= case
+		l_state=Init & addL	: L;
+		l_state=L &removeL	: Init;
+		TRUE				: l_state;
+	esac;
+
+  ASSIGN
+	init(r_state) := Init;
+	next(r_state)	:= case
+		r_state=Init & addR	: R;
+		r_state=R & removeR : Init;
+		TRUE				: r_state;
+	esac;
+
+  ASSIGN
+	init(p_state) := Init;
+	next(p_state)	:= case
+		p_state=Init & addP : P;
+		p_state=P & removeP	: Init;
+		TRUE				: p_state;
+	esac;
+
+  INVAR
+	!(addL & removeL) &
+	!(addR & removeR) &
+	!(addP & removeP) &
+	!(_is_rightHolder & _is_liable);
+
+--------------------------------------------------------------------------------------
+-- 'cnt_in_effect'    indicates if the contract is in inEffect state
+-- 'power_suspended'  indicates if a power suspends the obligation
+-- 'cnt_suspended'    indicates if the contract suspension suspends the obligation
+-- 'power_resumed'    indicates if a power resumption resumes the obligation
+-- 'cnt_resumed'      indicates if the contract resumption resumes the obligation
+--------------------------------------------------------------------------------------
+MODULE Obligation(name, surviving, cnt_in_effect, cnt_untermination,
+                  fulfilled, triggered, violated, activated,
+				  expired1, power_suspended, cnt_suspended, terminated, power_resumed,
+				  cnt_resumed, discharged, antecedent)
+  DEFINE
+	_name 		:= name;
+	_surviving	:= surviving;
+	_suspended 	:= (power_suspended | (cnt_suspended & !surviving));
+	_active 	:= (state = inEffect | state = suspension);
+
+  VAR
+	state 		: {not_created, create, inEffect, suspension, discharge,
+				   fulfillment, violation, unsTermination};
+	sus_state	: {not_suspended, sus_by_contract, sus_by_power};
+
+  ASSIGN
+ --NEW: update axioms(surviving obligations are not suspended! informally mentioned)
+	init(sus_state) := not_suspended;
+	next(sus_state)	:= case
+		sus_state=not_suspended & !surviving & cnt_suspended 	: sus_by_contract;
+		sus_state=sus_by_contract & !surviving & cnt_resumed	: not_suspended;
+		sus_state=not_suspended & !surviving & power_suspended 	: sus_by_power;
+		sus_state=sus_by_power & !surviving & power_resumed		: not_suspended;
+		TRUE													: sus_state;
+	esac;
+
+  ASSIGN
+    init(state) := not_created;
+    next(state) := case
+		cnt_in_effect & state=not_created   & triggered & !antecedent : create;
+		cnt_in_effect & state=not_created   & triggered & antecedent  : inEffect;
+		cnt_in_effect & state=create        & antecedent              : inEffect;
+		cnt_in_effect & state=create        & (expired1 | discharged)  : discharge;
+		cnt_in_effect & state=inEffect      & fulfilled               : fulfillment;
+		cnt_in_effect & state=inEffect      & _suspended              : suspension;
+		cnt_in_effect & state=inEffect      & violated                : violation;
+		cnt_in_effect & _active            	& terminated              : unsTermination;
+		cnt_untermination & !surviving  	& _active           	  : unsTermination;
+		sus_state=sus_by_contract & state=suspension  & cnt_resumed   : inEffect;
+		sus_state=sus_by_power	  & state=suspension  & power_resumed   : inEffect;
+		TRUE                                                          : state;
+  esac;
+
+--------------------------------------------------------------------------------------
+-- 'cnt_in_effect'   indicates if the contract is in inEffect state
+-- 'power_suspended' indicates if a power suspends the power
+-- 'cnt_suspended'   indicates if the contract suspension suspends the power
+-- 'power_resumed'   indicates if a power resumption resumes the power
+-- 'cnt_resumed'     indicates if the contract resumption resumes the power
+--------------------------------------------------------------------------------------
+MODULE Power(name, cnt_in_effect, triggered, activated, expired1, power_suspended, cnt_suspended,
+       	     terminated, exerted, power_resumed, cnt_resumed, antecedent)
+  DEFINE
+	_name		 := name;
+	_active 	 := (state = inEffect | state = suspension);
+	_suspended 	 := (power_suspended | cnt_suspended);
+
+  VAR
+	state 		: {not_created, create, inEffect, suspension, sTermination, unsTermination};
+	sus_state	: {not_suspended, sus_by_contract, sus_by_power};
+
+  ASSIGN
+	init(sus_state) := not_suspended;
+	next(sus_state)	:= case
+		sus_state=not_suspended & cnt_suspended 	: sus_by_contract;
+		sus_state=sus_by_contract & cnt_resumed		: not_suspended;
+		sus_state=not_suspended & power_suspended 	: sus_by_power;
+		sus_state=sus_by_power & power_resumed		: not_suspended;
+		TRUE										: sus_state;
+	esac;
+
+  ASSIGN
+   init(state) := not_created;
+   next(state) := case
+     cnt_in_effect & state = not_created 	& triggered & !antecedent : create;
+     cnt_in_effect & state = not_created 	& triggered & antecedent  : inEffect;
+     cnt_in_effect & state = create      	& antecedent              : inEffect;
+     cnt_in_effect & state = create      	& expired1                : unsTermination;
+     cnt_in_effect & state = inEffect    	& exerted                 : sTermination;
+     cnt_in_effect & state = inEffect   	& _suspended              : suspension;
+     cnt_in_effect & state = inEffect    	& expired1                : unsTermination;
+	 cnt_in_effect & _active  			 	& terminated              : unsTermination;
+
+	 sus_state=sus_by_contract & state=suspension  & cnt_resumed 	  : inEffect;
+	 sus_state=sus_by_power	   & state=suspension  & power_resumed      : inEffect;
+
+     TRUE                                          				   	  : state;
+   esac;
+
+--------------------------------------------------------------------------------------
+-- 'assigned_party'				 indicates if a party is assigned to a role
+-- 'revoked_party'				 indicates if a party is unassigned from a role
+-- 'fulfilled_active_obligation' indicates if all active obligations are fulfilled
+--------------------------------------------------------------------------------------
+MODULE Contract(triggered, activated, terminated, suspended, resumed,
+				revoked_party, assigned_party, fulfilled_active_obligation)
+  DEFINE
+	_active 	 := (state = unassign | state = inEffect | state = suspension);
+	_termination := (state = sTermination | state = unsTermination);
+
+	-- obligations/powers' status changes once the contract goes to inEffect state
+	_o_activated := (state = form & activated) |
+						(state = suspension & resumed) |
+						(state = unassign & assigned_party) |
+						(state = inEffect);
+
+  VAR
+	state 		 : { not_created, form, inEffect, suspension, unassign, sTermination, unsTermination};
+
+  ASSIGN
+    init(state) := not_created;
+    next(state) := case
+		state = not_created & triggered  					: form;
+		state = form        & activated  					: inEffect;
+		state = inEffect    & fulfilled_active_obligation  	: sTermination;
+		state = inEffect    & suspended  					: suspension;
+		state = inEffect    & revoked_party  				: unassign;
+		state = inEffect    & terminated 					: unsTermination;
+		state = suspension  & resumed    					: inEffect;
+		state = suspension  & terminated 					: unsTermination;
+		state = unassign    & assigned_party 				: inEffect;
+		state = unassign    & terminated 					: unsTermination;
+		TRUE                             					: state;
+    esac;
+
+--------------------------------------------------------------------------------------
+-- CONTRACT INDEPENDENT CONCEPTS
+--------------------------------------------------------------------------------------
+MODULE Role(party)
+ DEFINE _party := party;
+
+MODULE Asset(owner)
+ DEFINE _owner := owner;
+ 
+MODULE Situation(proposition)
+ DEFINE _holds := proposition;
+ 
+-- WhappensBefore(e,t), ShappensBefore(e,t) are HappensAfter(e,t) are simulated as Happens(e,t) 		 
+MODULE WhappensBefore(event, time)
+ DEFINE _false  := (state = not_happened);
+	    _true := (state = happened);
+ VAR state: {not_happened, happened};
+	ASSIGN
+	    init(state) := not_happened;
+	    next(state) := case
+			state = not_happened & event.event._active & next(event.event._happened) : happened;
+			TRUE : state;
+		esac;
+		
+MODULE ShappensBefore(event, time)
+ DEFINE _false  := (state = not_happened);
+	    _true := (state = happened);
+ VAR state: {not_happened, happened};
+	ASSIGN
+	    init(state) := not_happened;
+	    next(state) := case
+			state = not_happened & event.event._active & next(event.event._happened) : happened;
+			TRUE : state;
+		esac;
+
+MODULE HappensAfter(event, time)
+ DEFINE _false  := (state = not_happened);
+	    _true := (state = happened);
+ VAR state: {not_happened, happened};
+	ASSIGN
+	    init(state) := not_happened;
+	    next(state) := case
+			state = not_happened & event.event._active & next(event.event._happened) : happened;
+			TRUE : state;
+		esac;
+			
+MODULE WhappensBeforeE(event1, event2)
+ DEFINE _false  := (state = not_happened);
+	    _true := (state = happened);
+ VAR state: {not_happened, happened};
+	ASSIGN
+	    init(state) := not_happened;
+	    next(state) := case
+			state = not_happened & event1.event._active & next(event1.event._happened) & !(next(event2_happened)) : happened;
+			TRUE : state;
+		esac;
+	
+MODULE ShappensBeforeE(event1, event2)
+ DEFINE _false  := (state = not_happened);
+        _true 	:= (state = ev1_ev2_happened);
+ VAR state: {not_happened, ev1_happened, ev1_ev2_happened};
+ 	ASSIGN
+   		init(state) := not_happened;
+    	next(state) := case
+			state = not_happened & event1.event._active & next(event1.event._happened) & !(next(event2.event._happened)) : ev1_happened;
+			state = ev1_happened & event2.event._active & next(event2.event._happened) : ev1_ev2_happened;
+			TRUE : state;
+ esac;
+	
+MODULE HappensWithin(event, situation)
+ DEFINE _false  := (state = not_happened);
+        _true 	:= (state = happened);
+ VAR state: {happened, not_happened};
+ 	ASSIGN
+    	init(state) := not_happened;
+    	next(state) := case
+			state = not_happened & event.event._active & next(event.event._happened) & situation._holds : happened;
+			TRUE : state;
+		esac;	
+
+MODULE HappensAfterE(event1, event2)
+ DEFINE _false  := (state = not_happened);
+        _true := (state = ev2_ev1_happened);
+
+ VAR state: {not_happened, ev2_happened, ev2_ev1_happened};
+ 	ASSIGN
+    	init(state) := not_happened;
+    	next(state) := case
+			state = not_happened & !(next(event1_happened)) & event2.event._active & next(event2.event._happened) : ev2_happened;
+			state = ev2_happened & event1.event._active & next(event1.event._happened) : ev2_ev1_happened;
+			TRUE : state;	
+	esac;
+
+--------------------------------------------------------------------------------------
+-- CONTRACT DEPENDENT CONCEPTS
+--------------------------------------------------------------------------------------
+
+MODULE Store(party)
+	 VAR
+			role : Role(party);
+
+MODULE Customer(party)
+	 VAR
+			role : Role(party);
+
+
+
+MODULE DEvent(start)
+	 VAR
+		event : Event(start);
+
+
+--------------------------------------------------------------------------------------
+-- CONTRACT
+--------------------------------------------------------------------------------------
+MODULE TestContract (cust, store)
+
+	CONSTANTS
+	"obld","obl0","obl1","obl2","obl3","obl4","obl5","obl6","obl7","obl8","obl9","obl10","obl11","obl12","pow0","pow1","pow2","pow3","pow4","pow5","pow6","pow7";
+	
+	VAR
+		pow0_exerted : Event(pow0.state=inEffect);
+		
+		pow1_exerted : Event(pow1.state=inEffect);
+		
+		pow2_exerted : Event(pow2.state=inEffect);
+		
+		pow3_exerted : Event(pow3.state=inEffect);
+		
+		pow4_exerted : Event(pow4.state=inEffect);
+		
+		pow5_exerted : Event(pow5.state=inEffect);
+		
+		pow7_exerted : Event(pow7.state=inEffect);
+		
+		pow6_exerted : Event(pow6.state=inEffect);
+		
+		obl0cons : DEvent(obl0.state=inEffect);
+		
+		obl0trig : DEvent(cnt.state=inEffect);
+		
+		obl1cons : DEvent(obl1.state=inEffect);
+		
+		obl1trig : DEvent(cnt.state=inEffect);
+		
+		obl2cons : DEvent(obl2.state=inEffect);
+		
+		obl2trig : DEvent(cnt.state=inEffect);
+		
+		obl3cons : DEvent(obl3.state=inEffect);
+		
+		obl3trig : DEvent(cnt.state=inEffect);
+		
+		obl4cons : DEvent(obl4.state=inEffect);
+		
+		obl4trig : DEvent(cnt.state=inEffect);
+		
+		obl5cons : DEvent(obl5.state=inEffect);
+		
+		obl6cons : DEvent(obl6.state=inEffect);
+		
+		obl6trig : DEvent(cnt.state=inEffect);
+		
+		obl7cons : DEvent(obl7.state=inEffect);
+		
+		obl7trig : DEvent(cnt.state=inEffect);
+		
+		obl8cons : DEvent(obl8.state=inEffect);
+		
+		obl8trig : DEvent(cnt.state=inEffect);
+		
+		obl9cons : DEvent(obl9.state=inEffect);
+		
+		obl9trig : DEvent(cnt.state=inEffect);
+		
+		obl10cons : DEvent(obl10.state=inEffect);
+		
+		obl10trig : DEvent(cnt.state=inEffect);
+		
+		obl11cons : DEvent(obl11.state=inEffect);
+		
+		obl11trig : DEvent(cnt.state=inEffect);
+		
+		obl12cons : DEvent(obl12.state=inEffect);
+		
+		obl12trig : DEvent(cnt.state=inEffect);
+		
+		pow0trig : DEvent(cnt.state=inEffect);
+		
+		pow1trig : DEvent(cnt.state=inEffect);
+		
+		pow3trig : DEvent(cnt.state=inEffect);
+		
+		pow4trig : DEvent(cnt.state=inEffect);
+		
+		pow5trig : DEvent(cnt.state=inEffect);
+		
+		pow6trig : DEvent(cnt.state=inEffect);
+		
+		pow7trig : DEvent(cnt.state=inEffect);
+		
+		
+		cnt_succ_Termination : Situation((cnt.state=inEffect)
+		& !(obld._active)
+		& !(obl0._active)
+		& !(obl1._active)
+		& !(obl2._active)
+		& !(obl3._active)
+		& !(obl4._active)
+		& !(obl5._active)
+		& !(obl6._active)
+		& !(obl7._active)
+		& !(obl8._active)
+		& !(obl9._active)
+		& !(obl10._active)
+		& !(obl11._active)
+		& !(obl12._active)
+		);
+		
+		--------------
+		-- SITUATIONS
+		--------------
+		pow0_exertion : Situation ((pow0._active & pow0_exerted._happened & pow0_exerted.performer = pow0_creditor._name & pow0_creditor._is_performer ));
+		
+		pow1_exertion : Situation ((pow1._active & pow1_exerted._happened & pow1_exerted.performer = pow1_creditor._name & pow1_creditor._is_performer ));
+		
+		pow2_exertion : Situation ((pow2._active & pow2_exerted._happened & pow2_exerted.performer = pow2_creditor._name & pow2_creditor._is_performer ));
+		
+		pow3_exertion : Situation ((pow3._active & pow3_exerted._happened & pow3_exerted.performer = pow3_creditor._name & pow3_creditor._is_performer ));
+		
+		pow4_exertion : Situation ((pow4._active & pow4_exerted._happened & pow4_exerted.performer = pow4_creditor._name & pow4_creditor._is_performer ));
+		
+		pow5_exertion : Situation ((pow5._active & pow5_exerted._happened & pow5_exerted.performer = pow5_creditor._name & pow5_creditor._is_performer ));
+		
+		pow7_exertion : Situation ((pow7._active & pow7_exerted._happened & pow7_exerted.performer = pow7_creditor._name & pow7_creditor._is_performer ));
+		
+		obld_suspension : Situation ((pow0._active & pow0_exerted._happened & pow0_exerted.performer = pow0_creditor._name & pow0_creditor._is_performer )|(pow1._active & pow1_exerted._happened & pow1_exerted.performer = pow1_creditor._name & pow1_creditor._is_performer )|(pow2._active & pow2_exerted._happened & pow2_exerted.performer = pow2_creditor._name & pow2_creditor._is_performer )|(pow3._active & pow3_exerted._happened & pow3_exerted.performer = pow3_creditor._name & pow3_creditor._is_performer )|(pow4._active & pow4_exerted._happened & pow4_exerted.performer = pow4_creditor._name & pow4_creditor._is_performer )|(pow5._active & pow5_exerted._happened & pow5_exerted.performer = pow5_creditor._name & pow5_creditor._is_performer )|(pow7._active & pow7_exerted._happened & pow7_exerted.performer = pow7_creditor._name & pow7_creditor._is_performer ));
+		
+		pow6_exertion : Situation ((pow6._active & pow6_exerted._happened & pow6_exerted.performer = pow6_creditor._name & pow6_creditor._is_performer ));
+		
+		obld_violated : Situation (FALSE);
+		
+		obl0_violated : Situation ((obl0cons.event._expired | (obl0cons.event._happened & !(obl0cons.event.performer = obl0_debtor._name & obl0_debtor._is_performer))));
+		
+		obl1_violated : Situation ((obl1cons.event._expired | (obl1cons.event._happened & !(obl1cons.event.performer = obl1_debtor._name & obl1_debtor._is_performer))));
+		
+		obl2_violated : Situation ((obl2cons.event._expired | (obl2cons.event._happened & !(obl2cons.event.performer = obl2_debtor._name & obl2_debtor._is_performer))));
+		
+		obl3_violated : Situation ((obl3cons.event._expired | (obl3cons.event._happened & !(obl3cons.event.performer = obl3_debtor._name & obl3_debtor._is_performer))));
+		
+		obl4_violated : Situation ((obl4cons.event._expired | (obl4cons.event._happened & !(obl4cons.event.performer = obl4_debtor._name & obl4_debtor._is_performer))));
+		
+		obl5_violated : Situation ((obl5cons.event._expired | (obl5cons.event._happened & !(obl5cons.event.performer = obl5_debtor._name & obl5_debtor._is_performer))));
+		
+		obl6_violated : Situation ((obl6cons.event._expired | (obl6cons.event._happened & !(obl6cons.event.performer = obl6_debtor._name & obl6_debtor._is_performer))));
+		
+		obl7_violated : Situation ((obl7cons.event._expired | (obl7cons.event._happened & !(obl7cons.event.performer = obl7_debtor._name & obl7_debtor._is_performer))));
+		
+		obl8_violated : Situation ((obl8cons.event._expired | (obl8cons.event._happened & !(obl8cons.event.performer = obl8_debtor._name & obl8_debtor._is_performer))));
+		
+		obl9_violated : Situation ((obl9cons.event._expired | (obl9cons.event._happened & !(obl9cons.event.performer = obl9_debtor._name & obl9_debtor._is_performer))));
+		
+		obl10_violated : Situation ((obl10cons.event._expired | (obl10cons.event._happened & !(obl10cons.event.performer = obl10_debtor._name & obl10_debtor._is_performer))));
+		
+		obl11_violated : Situation ((obl11cons.event._expired | (obl11cons.event._happened & !(obl11cons.event.performer = obl11_debtor._name & obl11_debtor._is_performer))));
+		
+		obl12_violated : Situation ((obl12cons.event._expired | (obl12cons.event._happened & !(obl12cons.event.performer = obl12_debtor._name & obl12_debtor._is_performer))));
+		
+		obld_expired : Situation (FALSE);
+		
+		obl0_expired : Situation (FALSE);
+		
+		obl1_expired : Situation (FALSE);
+		
+		obl2_expired : Situation (FALSE);
+		
+		obl3_expired : Situation (FALSE);
+		
+		obl4_expired : Situation (FALSE);
+		
+		obl5_expired : Situation (FALSE);
+		
+		obl6_expired : Situation (FALSE);
+		
+		obl7_expired : Situation (FALSE);
+		
+		obl8_expired : Situation (FALSE);
+		
+		obl9_expired : Situation (FALSE);
+		
+		obl10_expired : Situation (FALSE);
+		
+		obl11_expired : Situation (FALSE);
+		
+		obl12_expired : Situation (FALSE);
+		
+		pow0_expired : Situation (FALSE);
+		
+		pow1_expired : Situation (FALSE);
+		
+		pow2_expired : Situation (FALSE);
+		
+		pow3_expired : Situation (FALSE);
+		
+		pow4_expired : Situation (FALSE);
+		
+		pow5_expired : Situation (FALSE);
+		
+		pow6_expired : Situation (FALSE);
+		
+		pow7_expired : Situation (FALSE);
+		
+		obld_consequent : Situation (TRUE);
+		
+		obl0_consequent : Situation ((obl0cons.event._happened & obl0cons.event.performer = obl0_debtor._name & obl0_debtor._is_performer));
+		
+		obl1_consequent : Situation ((obl1cons.event._happened & obl1cons.event.performer = obl1_debtor._name & obl1_debtor._is_performer));
+		
+		obl2_consequent : Situation ((obl2cons.event._happened & obl2cons.event.performer = obl2_debtor._name & obl2_debtor._is_performer));
+		
+		obl3_consequent : Situation ((obl3cons.event._happened & obl3cons.event.performer = obl3_debtor._name & obl3_debtor._is_performer));
+		
+		obl4_consequent : Situation ((obl4cons.event._happened & obl4cons.event.performer = obl4_debtor._name & obl4_debtor._is_performer));
+		
+		obl5_consequent : Situation ((obl5cons.event._happened & obl5cons.event.performer = obl5_debtor._name & obl5_debtor._is_performer));
+		
+		obl6_consequent : Situation ((obl6cons.event._happened & obl6cons.event.performer = obl6_debtor._name & obl6_debtor._is_performer));
+		
+		obl7_consequent : Situation ((obl7cons.event._happened & obl7cons.event.performer = obl7_debtor._name & obl7_debtor._is_performer));
+		
+		obl8_consequent : Situation ((obl8cons.event._happened & obl8cons.event.performer = obl8_debtor._name & obl8_debtor._is_performer));
+		
+		obl9_consequent : Situation ((obl9cons.event._happened & obl9cons.event.performer = obl9_debtor._name & obl9_debtor._is_performer));
+		
+		obl10_consequent : Situation ((obl10cons.event._happened & obl10cons.event.performer = obl10_debtor._name & obl10_debtor._is_performer));
+		
+		obl11_consequent : Situation ((obl11cons.event._happened & obl11cons.event.performer = obl11_debtor._name & obl11_debtor._is_performer));
+		
+		obl12_consequent : Situation ((obl12cons.event._happened & obl12cons.event.performer = obl12_debtor._name & obl12_debtor._is_performer));
+		
+		obl0_trigger : Situation ((obl0trig.event._happened));
+		
+		obl1_trigger : Situation ((obl1trig.event._happened));
+		
+		obl2_trigger : Situation ((obl2trig.event._happened));
+		
+		obl3_trigger : Situation ((obl3trig.event._happened));
+		
+		obl4_trigger : Situation ((obl4trig.event._happened));
+		
+		obl5_trigger : Situation (pow6.state=sTermination);
+		
+		obl6_trigger : Situation ((obl6trig.event._happened));
+		
+		obl7_trigger : Situation ((obl7trig.event._happened));
+		
+		obl8_trigger : Situation ((obl8trig.event._happened));
+		
+		obl9_trigger : Situation ((obl9trig.event._happened));
+		
+		obl10_trigger : Situation ((obl10trig.event._happened));
+		
+		obl11_trigger : Situation ((obl11trig.event._happened));
+		
+		obl12_trigger : Situation ((obl12trig.event._happened));
+		
+		pow0_trigger : Situation ((pow0trig.event._happened));
+		
+		pow1_trigger : Situation ((pow1trig.event._happened));
+		
+		pow2_trigger : Situation (obl2.state=violation);
+		
+		pow3_trigger : Situation ((pow3trig.event._happened));
+		
+		pow4_trigger : Situation ((pow4trig.event._happened));
+		
+		pow5_trigger : Situation ((pow5trig.event._happened));
+		
+		pow6_trigger : Situation ((pow6trig.event._happened));
+		
+		pow7_trigger : Situation ((pow7trig.event._happened));
+		
+		
+		cnt: Contract(TRUE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, cnt_succ_Termination._holds);
+			
+		--------------
+		-- OBLIGATIONS
+		--------------		
+		obld : Obligation("obld", FALSE, cnt._o_activated, FALSE, obld_consequent._holds, TRUE, obld_violated._holds, FALSE, obld_expired._holds, obld_suspension._holds, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl0 : Obligation("obl0", FALSE, cnt._o_activated, FALSE, obl0_consequent._holds, obl0_trigger._holds, obl0_violated._holds, FALSE, obl0_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl1 : Obligation("obl1", FALSE, cnt._o_activated, FALSE, obl1_consequent._holds, obl1_trigger._holds, obl1_violated._holds, FALSE, obl1_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl2 : Obligation("obl2", FALSE, cnt._o_activated, FALSE, obl2_consequent._holds, obl2_trigger._holds, obl2_violated._holds, FALSE, obl2_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl3 : Obligation("obl3", FALSE, cnt._o_activated, FALSE, obl3_consequent._holds, obl3_trigger._holds, obl3_violated._holds, FALSE, obl3_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl4 : Obligation("obl4", FALSE, cnt._o_activated, FALSE, obl4_consequent._holds, obl4_trigger._holds, obl4_violated._holds, FALSE, obl4_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl5 : Obligation("obl5", FALSE, cnt._o_activated, FALSE, obl5_consequent._holds, obl5_trigger._holds, obl5_violated._holds, FALSE, obl5_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl6 : Obligation("obl6", FALSE, cnt._o_activated, FALSE, obl6_consequent._holds, obl6_trigger._holds, obl6_violated._holds, FALSE, obl6_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl7 : Obligation("obl7", FALSE, cnt._o_activated, FALSE, obl7_consequent._holds, obl7_trigger._holds, obl7_violated._holds, FALSE, obl7_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl8 : Obligation("obl8", FALSE, cnt._o_activated, FALSE, obl8_consequent._holds, obl8_trigger._holds, obl8_violated._holds, FALSE, obl8_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl9 : Obligation("obl9", FALSE, cnt._o_activated, FALSE, obl9_consequent._holds, obl9_trigger._holds, obl9_violated._holds, FALSE, obl9_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl10 : Obligation("obl10", FALSE, cnt._o_activated, FALSE, obl10_consequent._holds, obl10_trigger._holds, obl10_violated._holds, FALSE, obl10_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl11 : Obligation("obl11", FALSE, cnt._o_activated, FALSE, obl11_consequent._holds, obl11_trigger._holds, obl11_violated._holds, FALSE, obl11_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl12 : Obligation("obl12", FALSE, cnt._o_activated, FALSE, obl12_consequent._holds, obl12_trigger._holds, obl12_violated._holds, FALSE, obl12_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		
+		--------------
+		-- POWERS
+		--------------
+		pow0 : Power("pow0", cnt._o_activated, pow0_trigger._holds, FALSE, pow0_expired._holds, FALSE, FALSE, FALSE, pow0_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow1 : Power("pow1", cnt._o_activated, pow1_trigger._holds, FALSE, pow1_expired._holds, FALSE, FALSE, FALSE, pow1_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow2 : Power("pow2", cnt._o_activated, pow2_trigger._holds, FALSE, pow2_expired._holds, FALSE, FALSE, FALSE, pow2_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow3 : Power("pow3", cnt._o_activated, pow3_trigger._holds, FALSE, pow3_expired._holds, FALSE, FALSE, FALSE, pow3_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow4 : Power("pow4", cnt._o_activated, pow4_trigger._holds, FALSE, pow4_expired._holds, FALSE, FALSE, FALSE, pow4_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow5 : Power("pow5", cnt._o_activated, pow5_trigger._holds, FALSE, pow5_expired._holds, FALSE, FALSE, FALSE, pow5_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow6 : Power("pow6", cnt._o_activated, pow6_trigger._holds, FALSE, pow6_expired._holds, FALSE, FALSE, FALSE, pow6_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow7 : Power("pow7", cnt._o_activated, pow7_trigger._holds, FALSE, pow7_expired._holds, FALSE, FALSE, FALSE, pow7_exertion._holds, FALSE, FALSE, TRUE);
+		
+		
+		--------------
+		-- PARTIES
+		--------------
+		obld_debtor : Party(obld._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obld_creditor : Party(obld._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl0_debtor : Party(obl0._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl0_creditor : Party(obl0._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl1_debtor : Party(obl1._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl1_creditor : Party(obl1._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl2_debtor : Party(obl2._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl2_creditor : Party(obl2._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl3_debtor : Party(obl3._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl3_creditor : Party(obl3._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl4_debtor : Party(obl4._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl4_creditor : Party(obl4._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl5_debtor : Party(obl5._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl5_creditor : Party(obl5._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl6_debtor : Party(obl6._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl6_creditor : Party(obl6._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl7_debtor : Party(obl7._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl7_creditor : Party(obl7._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl8_debtor : Party(obl8._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl8_creditor : Party(obl8._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl9_debtor : Party(obl9._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl9_creditor : Party(obl9._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl10_debtor : Party(obl10._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl10_creditor : Party(obl10._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl11_debtor : Party(obl11._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl11_creditor : Party(obl11._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl12_debtor : Party(obl12._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl12_creditor : Party(obl12._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		
+		pow0_debtor : Party(pow0._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow0_creditor : Party(pow0._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow1_debtor : Party(pow1._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow1_creditor : Party(pow1._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow2_debtor : Party(pow2._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow2_creditor : Party(pow2._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow3_debtor : Party(pow3._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow3_creditor : Party(pow3._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow4_debtor : Party(pow4._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow4_creditor : Party(pow4._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow5_debtor : Party(pow5._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow5_creditor : Party(pow5._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow6_debtor : Party(pow6._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow6_creditor : Party(pow6._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow7_debtor : Party(pow7._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow7_creditor : Party(pow7._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		
+		-----------------------
+		-- IMPLICIT CONSTRAINTS
+		-----------------------
+		
+		--------------
+		-- CONSTRAINTS
+		--------------
+		
+		--------------
+		-- Assignment
+		--------------
+
+--------------------------------------------------------------------
+---Main Module
+--------------------------------------------------------------------
+MODULE main
+
+VAR
+ cust: Customer("Customer");
+ store: Store("Store");
+ 
+ Test_cnt : TestContract(cust, store);
+
+
+CTLSPEC NAME CTL0 := (Test_cnt.obl3.state=inEffect) | (Test_cnt.obl11.state=discharge) | ((Test_cnt.obl2.state=suspension) & (Test_cnt.obl4.state=inEffect))
+
+		CTLSPEC NAME CTL1 := !((Test_cnt.obl3.state=suspension) & (Test_cnt.pow2.state=inEffect) & (EF(Test_cnt.obl6.state=violation)))
+
+		CTLSPEC NAME CTL2 := (!(Test_cnt.obl11.state=inEffect)) | ((Test_cnt.obl12.state=create) & (EF(Test_cnt.obl4.state=unsTermination)))
+
+		CTLSPEC NAME CTL3 := (Test_cnt.obl0.state=discharge) | (Test_cnt.obl1.state=inEffect) | ((Test_cnt.obl8.state=discharge) & (Test_cnt.obl8.state=inEffect))
+
+		CTLSPEC NAME CTL4 := (Test_cnt.pow3.state=suspension) -> (EF((Test_cnt.obl7.state=suspension) & (AG(Test_cnt.pow4.state=suspension))))
+
+		CTLSPEC NAME CTL5 := (!(Test_cnt.obl3.state=discharge)) -> (!(Test_cnt.obl10.state=inEffect))
+
+		CTLSPEC NAME CTL6 := (EF(Test_cnt.obl4.state=inEffect)) -> (EG(EF(Test_cnt.obl7.state=discharge)))
+
+		CTLSPEC NAME CTL7 := (Test_cnt.obl1.state=fulfillment) & (AF((Test_cnt.obl6.state=suspension) -> (EF(Test_cnt.obl8.state=violation))))
+
+		CTLSPEC NAME CTL8 := (EG(Test_cnt.obl2.state=discharge)) -> ((Test_cnt.obl11.state=unsTermination) -> (EG(Test_cnt.obl6.state=violation)))
+
+		CTLSPEC NAME CTL9 := EG(!(EF((Test_cnt.obl8.state=create) & (AF(Test_cnt.pow4.state=suspension)))))
+
+		CTLSPEC NAME CTL10 := AG((Test_cnt.obl7.state=suspension) & (Test_cnt.pow1.state=create) & (AF(Test_cnt.pow3.state=unsTermination)))
+
+		CTLSPEC NAME CTL11 := (!((Test_cnt.obl4.state=create) -> (Test_cnt.obl1.state=violation))) & (EF(Test_cnt.obl1.state=suspension))
+
+		CTLSPEC NAME CTL12 := (Test_cnt.obl1.state=unsTermination) & ((Test_cnt.obl11.state=create) -> (!(AG(Test_cnt.obl3.state=create))))
+
+		CTLSPEC NAME CTL13 := ((Test_cnt.pow3.state=suspension) & (!(AF(Test_cnt.obl5.state=violation)))) -> (Test_cnt.obl6.state=unsTermination)
+
+		CTLSPEC NAME CTL14 := ((Test_cnt.obl12.state=inEffect) & (Test_cnt.pow2.state=sTermination) & (Test_cnt.pow6.state=inEffect)) -> (Test_cnt.obl2.state=discharge)
+
+		CTLSPEC NAME CTL15 := (!(Test_cnt.obl2.state=unsTermination)) & (EF(EG(AF(Test_cnt.pow4.state=sTermination))))
+
+		CTLSPEC NAME CTL16 := EF((EF(Test_cnt.obl11.state=suspension)) | (EF(Test_cnt.obl6.state=unsTermination)))
+
+		CTLSPEC NAME CTL17 := EF(!(AG(!(EG(!(Test_cnt.obl3.state=suspension))))))
+
+		CTLSPEC NAME CTL18 := (Test_cnt.obl0.state=create) | (((Test_cnt.obl9.state=create) & (Test_cnt.pow1.state=inEffect)) -> (Test_cnt.pow6.state=inEffect))
+
+		CTLSPEC NAME CTL19 := !(EG((Test_cnt.pow1.state=sTermination) -> (!(AF(Test_cnt.pow1.state=sTermination)))))
+
+		CTLSPEC NAME CTL20 := AG((Test_cnt.obl3.state=inEffect) & (!((Test_cnt.obl0.state=inEffect) | (Test_cnt.obl10.state=fulfillment))))
+
+		CTLSPEC NAME CTL21 := ((Test_cnt.obl0.state=discharge) | (AG(Test_cnt.obl0.state=violation))) & (AF(Test_cnt.pow0.state=unsTermination))
+
+		CTLSPEC NAME CTL22 := !((Test_cnt.obl2.state=fulfillment) & (Test_cnt.obl11.state=fulfillment) & (!(Test_cnt.pow5.state=inEffect)))
+
+		CTLSPEC NAME CTL23 := ((Test_cnt.obl9.state=inEffect) & (Test_cnt.pow6.state=inEffect)) | ((Test_cnt.obl7.state=suspension) -> (Test_cnt.obl9.state=discharge))
+
+		CTLSPEC NAME CTL24 := (Test_cnt.obl9.state=suspension) & (AG(Test_cnt.obl10.state=discharge)) & (EG(Test_cnt.obl2.state=suspension))
+
+		CTLSPEC NAME CTL25 := AG((Test_cnt.obl5.state=inEffect) & (Test_cnt.pow7.state=suspension) & (AF(Test_cnt.pow1.state=sTermination)))
+
+		CTLSPEC NAME CTL26 := (Test_cnt.obl5.state=violation) & (!(EF((Test_cnt.obl12.state=inEffect) & (Test_cnt.pow2.state=sTermination))))
+
+		CTLSPEC NAME CTL27 := AG((!(Test_cnt.obl7.state=unsTermination)) | (EF(EG(Test_cnt.obl6.state=inEffect))))
+
+		CTLSPEC NAME CTL28 := (Test_cnt.obl8.state=fulfillment) | (Test_cnt.obl11.state=inEffect) | ((Test_cnt.obl12.state=unsTermination) & (Test_cnt.pow0.state=unsTermination))
+
+		CTLSPEC NAME CTL29 := (Test_cnt.obl0.state=discharge) & (Test_cnt.pow6.state=suspension) & (AF(Test_cnt.pow7.state=suspension))
+
+		CTLSPEC NAME CTL30 := EF((!(Test_cnt.obl4.state=unsTermination)) & (!(AF(Test_cnt.obl2.state=inEffect))))
+
+		CTLSPEC NAME CTL31 := !(EF((!(Test_cnt.obl7.state=create)) -> (EG(Test_cnt.obl8.state=discharge))))
+
+		CTLSPEC NAME CTL32 := (AG(Test_cnt.obl1.state=fulfillment)) -> ((Test_cnt.obl6.state=inEffect) | (AG(Test_cnt.pow3.state=sTermination)))
+
+		CTLSPEC NAME CTL33 := AF((AG(Test_cnt.obl4.state=discharge)) -> (AF(AG(Test_cnt.obl6.state=inEffect))))
+
+		CTLSPEC NAME CTL34 := (Test_cnt.obl5.state=create) & (AF(EG(Test_cnt.obl0.state=violation)))
+
+		CTLSPEC NAME CTL35 := EF(EG(AF(EG(Test_cnt.obl4.state=suspension))))
+
+		CTLSPEC NAME CTL36 := AG((Test_cnt.obl10.state=inEffect) & ((!(Test_cnt.obl2.state=fulfillment)) -> (Test_cnt.obl3.state=violation)))
+
+		CTLSPEC NAME CTL37 := AG(AF((Test_cnt.obl1.state=suspension) | (Test_cnt.obl9.state=unsTermination)))
+
+		CTLSPEC NAME CTL38 := ((Test_cnt.pow7.state=inEffect) & (AF(Test_cnt.pow1.state=suspension))) | (AF(Test_cnt.obl1.state=unsTermination))
+
+		CTLSPEC NAME CTL39 := (Test_cnt.obl7.state=inEffect) | (Test_cnt.pow3.state=sTermination) | (AF(!(Test_cnt.obl10.state=discharge)))
+
+		CTLSPEC NAME CTL40 := (Test_cnt.obl1.state=inEffect) & (EF(Test_cnt.obl5.state=inEffect)) & (EF(Test_cnt.obl7.state=violation))
+
+		CTLSPEC NAME CTL41 := EF(AG(!(AF(Test_cnt.obl3.state=fulfillment))))
+
+		CTLSPEC NAME CTL42 := AG((AF(Test_cnt.obl3.state=create)) & (!(AF(Test_cnt.pow1.state=inEffect))))
+
+		CTLSPEC NAME CTL43 := AF((Test_cnt.obl1.state=unsTermination) | (AF(EG(AF(Test_cnt.obl1.state=suspension)))))
+
+		CTLSPEC NAME CTL44 := (AF(AG(EF(Test_cnt.obl7.state=fulfillment)))) -> (!(Test_cnt.pow5.state=create))
+
+		CTLSPEC NAME CTL45 := EF((Test_cnt.obl7.state=suspension) & (Test_cnt.pow5.state=create) & (AF(Test_cnt.obl5.state=violation)))
+
+		CTLSPEC NAME CTL46 := EG((Test_cnt.obl2.state=violation) & (Test_cnt.obl12.state=fulfillment) & (AF(Test_cnt.pow3.state=create)))
+
+		CTLSPEC NAME CTL47 := EF((AG(Test_cnt.obl0.state=create)) -> (!(EF(Test_cnt.obl1.state=inEffect))))
+
+		CTLSPEC NAME CTL48 := (Test_cnt.obl4.state=create) & (AG(EF((Test_cnt.obl4.state=fulfillment) -> (Test_cnt.pow6.state=unsTermination))))
+
+		CTLSPEC NAME CTL49 := (Test_cnt.obl0.state=suspension) & (Test_cnt.obl9.state=fulfillment)
+
+		CTLSPEC NAME CTL50 := (Test_cnt.obl1.state=violation) & (Test_cnt.obl4.state=create) & (Test_cnt.obl10.state=suspension) & (Test_cnt.pow6.state=unsTermination)
+
+		CTLSPEC NAME CTL51 := (!(Test_cnt.pow4.state=create)) & (EG(!(EF(Test_cnt.obl10.state=suspension))))
+
+		CTLSPEC NAME CTL52 := AG((Test_cnt.obl12.state=create) | (EF(Test_cnt.obl5.state=create)))
+
+		CTLSPEC NAME CTL53 := EG(AF((EG(Test_cnt.obl5.state=create)) | (AF(Test_cnt.obl9.state=unsTermination))))
+
+		CTLSPEC NAME CTL54 := (Test_cnt.pow5.state=suspension) -> (!((EF(Test_cnt.obl3.state=unsTermination)) -> (Test_cnt.obl6.state=create)))
+
+		CTLSPEC NAME CTL55 := ((!(EF(Test_cnt.obl7.state=suspension))) -> (Test_cnt.pow3.state=inEffect)) -> (Test_cnt.obl4.state=suspension)
+
+		CTLSPEC NAME CTL56 := AF((!(Test_cnt.obl1.state=unsTermination)) | (Test_cnt.obl9.state=unsTermination))
+
+		CTLSPEC NAME CTL57 := AF((Test_cnt.pow4.state=sTermination) & (Test_cnt.pow6.state=suspension) & (EF(Test_cnt.obl8.state=create)))
+
+		CTLSPEC NAME CTL58 := (Test_cnt.obl7.state=suspension) & (!(Test_cnt.pow7.state=unsTermination)) & (AG(Test_cnt.pow3.state=sTermination))
+
+		CTLSPEC NAME CTL59 := EF((EF(Test_cnt.pow1.state=sTermination)) & (EG(EF(Test_cnt.obl6.state=discharge))))
+
+		CTLSPEC NAME CTL60 := AF(!(EF(!((Test_cnt.obl4.state=suspension) & (Test_cnt.pow2.state=suspension)))))
+
+		CTLSPEC NAME CTL61 := EF(!((Test_cnt.pow4.state=suspension) & (!(AG(Test_cnt.obl9.state=violation)))))
+
+		CTLSPEC NAME CTL62 := AG((Test_cnt.obl8.state=unsTermination) & (EF(Test_cnt.obl2.state=create)))
+
+		CTLSPEC NAME CTL63 := (!(Test_cnt.obl9.state=suspension)) | ((Test_cnt.pow2.state=inEffect) -> (!(Test_cnt.pow3.state=unsTermination)))
+
+		CTLSPEC NAME CTL64 := EG(((Test_cnt.obl3.state=inEffect) & (Test_cnt.obl8.state=fulfillment)) -> (EF(Test_cnt.obl10.state=violation)))
+
+		CTLSPEC NAME CTL65 := (Test_cnt.pow0.state=suspension) & (AG(Test_cnt.pow0.state=create)) & (AF(Test_cnt.pow0.state=inEffect))
+
+		CTLSPEC NAME CTL66 := ((EF(Test_cnt.pow7.state=inEffect)) -> (EF(Test_cnt.obl7.state=create))) -> (Test_cnt.obl8.state=violation)
+
+		CTLSPEC NAME CTL67 := (AF((Test_cnt.obl5.state=discharge) & (Test_cnt.obl12.state=suspension))) & (AF(Test_cnt.pow4.state=create))
+
+		CTLSPEC NAME CTL68 := EF((!(Test_cnt.obl9.state=discharge)) & ((Test_cnt.obl12.state=violation) -> (Test_cnt.obl1.state=create)))
+
+		CTLSPEC NAME CTL69 := ((Test_cnt.obl4.state=unsTermination) & (Test_cnt.pow4.state=create)) | ((Test_cnt.obl2.state=violation) & (Test_cnt.pow3.state=suspension))
+
+		CTLSPEC NAME CTL70 := EF((!(Test_cnt.obl11.state=fulfillment)) & ((Test_cnt.pow6.state=unsTermination) -> (Test_cnt.obl1.state=inEffect)))
+
+		CTLSPEC NAME CTL71 := !((!(Test_cnt.obl10.state=suspension)) & (Test_cnt.obl12.state=inEffect))
+
+		CTLSPEC NAME CTL72 := ((Test_cnt.obl1.state=create) & (EF(!(Test_cnt.pow5.state=create)))) -> (Test_cnt.obl1.state=inEffect)
+
+		CTLSPEC NAME CTL73 := (Test_cnt.pow4.state=inEffect) & (EF(Test_cnt.obl8.state=inEffect)) & (EG(Test_cnt.obl5.state=discharge))
+
+		CTLSPEC NAME CTL74 := (Test_cnt.pow4.state=inEffect) & (AF((!(Test_cnt.obl4.state=violation)) | (Test_cnt.pow1.state=create)))
+
+		CTLSPEC NAME CTL75 := (!(Test_cnt.obl9.state=create)) & (!(AF(Test_cnt.obl1.state=fulfillment)))
+
+		CTLSPEC NAME CTL76 := (Test_cnt.pow4.state=suspension) & (AF((Test_cnt.pow1.state=inEffect) & (!(Test_cnt.pow3.state=inEffect))))
+
+		CTLSPEC NAME CTL77 := (!(Test_cnt.obl4.state=inEffect)) -> (AF(Test_cnt.obl6.state=fulfillment))
+
+		CTLSPEC NAME CTL78 := (EF(Test_cnt.obl3.state=suspension)) & (AF(EG(Test_cnt.obl12.state=discharge)))
+
+		CTLSPEC NAME CTL79 := AG((Test_cnt.obl3.state=discharge) & ((!(Test_cnt.obl1.state=inEffect)) | (Test_cnt.pow2.state=suspension)))
+
+		CTLSPEC NAME CTL80 := EF(((Test_cnt.pow2.state=create) & (!(Test_cnt.pow2.state=create))) -> (Test_cnt.obl10.state=unsTermination))
+
+		CTLSPEC NAME CTL81 := (Test_cnt.obl7.state=create) | (AF(!(Test_cnt.obl4.state=create)))
+
+		CTLSPEC NAME CTL82 := (Test_cnt.obl5.state=suspension) | (EF(Test_cnt.obl7.state=inEffect)) | (EF(Test_cnt.pow5.state=suspension))
+
+		CTLSPEC NAME CTL83 := (Test_cnt.obl8.state=discharge) & (!(Test_cnt.pow7.state=inEffect)) & (AF(Test_cnt.pow5.state=sTermination))
+
+		CTLSPEC NAME CTL84 := EG(EF((Test_cnt.obl6.state=unsTermination) | ((Test_cnt.obl5.state=discharge) & (Test_cnt.obl10.state=unsTermination))))
+
+		CTLSPEC NAME CTL85 := (Test_cnt.obl2.state=create) & (Test_cnt.pow6.state=create) & ((Test_cnt.pow6.state=suspension) -> (Test_cnt.obl11.state=discharge))
+
+		CTLSPEC NAME CTL86 := AF((Test_cnt.pow2.state=inEffect) | ((Test_cnt.obl5.state=suspension) & (EF(Test_cnt.obl6.state=create))))
+
+		CTLSPEC NAME CTL87 := AF((Test_cnt.obl0.state=violation) & (Test_cnt.obl8.state=violation) & (AG(Test_cnt.pow2.state=inEffect)))
+
+		CTLSPEC NAME CTL88 := AF(((Test_cnt.obl8.state=suspension) & (Test_cnt.pow6.state=create)) -> (!(Test_cnt.obl5.state=create)))
+
+		CTLSPEC NAME CTL89 := AG((!(EF(Test_cnt.obl10.state=unsTermination))) & (AG(Test_cnt.pow5.state=sTermination)))
+
+		CTLSPEC NAME CTL90 := EF(AG((!(AG(Test_cnt.pow2.state=create))) -> (Test_cnt.obl12.state=unsTermination)))
+
+		CTLSPEC NAME CTL91 := AG((Test_cnt.obl8.state=violation) & (AF(Test_cnt.obl5.state=inEffect)))
+
+		CTLSPEC NAME CTL92 := (EF(!(Test_cnt.pow2.state=create))) & (AG(EF(Test_cnt.pow0.state=unsTermination)))
+
+		CTLSPEC NAME CTL93 := (Test_cnt.obl9.state=inEffect) | (!((Test_cnt.pow3.state=unsTermination) & (EF(Test_cnt.pow1.state=unsTermination))))
+
+		CTLSPEC NAME CTL94 := (AG(Test_cnt.pow3.state=inEffect)) & ((Test_cnt.pow7.state=suspension) -> (AF(Test_cnt.obl0.state=inEffect)))
+
+		CTLSPEC NAME CTL95 := !(AF((AG(Test_cnt.obl10.state=discharge)) | (EF(Test_cnt.obl6.state=discharge))))
+
+		CTLSPEC NAME CTL96 := !((AF((Test_cnt.obl2.state=discharge) -> (Test_cnt.obl10.state=unsTermination))) -> (Test_cnt.pow5.state=unsTermination))
+
+		CTLSPEC NAME CTL97 := (EG(Test_cnt.obl8.state=create)) & ((Test_cnt.obl6.state=discharge) -> (EF(Test_cnt.obl6.state=violation)))
+
+		CTLSPEC NAME CTL98 := !(AF(!((!(Test_cnt.obl0.state=suspension)) & (Test_cnt.pow6.state=inEffect))))
+
+		CTLSPEC NAME CTL99 := EF((Test_cnt.pow3.state=create) | ((Test_cnt.obl8.state=unsTermination) & (Test_cnt.obl10.state=unsTermination)))
+
+		CTLSPEC NAME CTL100 := EG((Test_cnt.pow1.state=unsTermination) | (!((Test_cnt.obl0.state=suspension) -> (Test_cnt.pow0.state=unsTermination))))
+
+		CTLSPEC NAME CTL101 := EF((AG(Test_cnt.pow0.state=unsTermination)) -> (Test_cnt.obl10.state=violation))
+
+		CTLSPEC NAME CTL102 := (Test_cnt.obl8.state=discharge) & ((Test_cnt.obl1.state=violation) | (Test_cnt.obl8.state=discharge))
+
+		CTLSPEC NAME CTL103 := (EF(Test_cnt.obl7.state=create)) | (EF((Test_cnt.pow7.state=sTermination) -> (Test_cnt.obl11.state=discharge)))
+
+		CTLSPEC NAME CTL104 := AF((Test_cnt.obl0.state=discharge) & ((Test_cnt.obl3.state=discharge) | (Test_cnt.pow7.state=sTermination)))
+
+		CTLSPEC NAME CTL105 := AF(AG((Test_cnt.obl11.state=create) | ((Test_cnt.obl4.state=create) & (Test_cnt.pow1.state=unsTermination))))
+
+		CTLSPEC NAME CTL106 := AF((Test_cnt.obl4.state=inEffect) & (!(AG(Test_cnt.obl5.state=fulfillment))))
+
+		CTLSPEC NAME CTL107 := AF(AG(Test_cnt.obl10.state=violation))
+
+		CTLSPEC NAME CTL108 := (Test_cnt.obl8.state=violation) | ((Test_cnt.obl4.state=suspension) & (AF(EG(Test_cnt.obl1.state=inEffect))))
+
+		CTLSPEC NAME CTL109 := AF((Test_cnt.pow0.state=suspension) & (!(EG(!(Test_cnt.obl6.state=unsTermination)))))
+
+		CTLSPEC NAME CTL110 := !((Test_cnt.obl7.state=unsTermination) -> (!(AF(EG(Test_cnt.obl12.state=inEffect)))))
+
+		CTLSPEC NAME CTL111 := (Test_cnt.pow5.state=inEffect) | (EF((Test_cnt.pow7.state=unsTermination) & (EF(Test_cnt.obl2.state=unsTermination))))
+
+		CTLSPEC NAME CTL112 := (!(Test_cnt.obl2.state=discharge)) & (!(Test_cnt.obl4.state=inEffect)) & (Test_cnt.obl9.state=unsTermination)
+
+		CTLSPEC NAME CTL113 := !((!(Test_cnt.obl3.state=unsTermination)) -> (!(AF(Test_cnt.obl12.state=suspension))))
+
+		CTLSPEC NAME CTL114 := (EG(AF(Test_cnt.obl11.state=create))) -> ((Test_cnt.obl9.state=violation) & (Test_cnt.pow0.state=inEffect))
+
+		CTLSPEC NAME CTL115 := ((Test_cnt.pow4.state=sTermination) & (EF(Test_cnt.obl12.state=suspension))) -> (!(Test_cnt.obl12.state=violation))
+
+		CTLSPEC NAME CTL116 := (EF(Test_cnt.obl8.state=unsTermination)) & (EF((Test_cnt.obl3.state=inEffect) -> (Test_cnt.obl10.state=inEffect)))
+
+		CTLSPEC NAME CTL117 := !(AF((Test_cnt.obl2.state=fulfillment) & (Test_cnt.pow2.state=inEffect) & (Test_cnt.pow3.state=suspension)))
+
+		CTLSPEC NAME CTL118 := AF(((Test_cnt.obl6.state=create) & (Test_cnt.obl6.state=inEffect)) | (AF(Test_cnt.pow2.state=create)))
+
+		CTLSPEC NAME CTL119 := (Test_cnt.obl11.state=suspension) & ((Test_cnt.obl11.state=discharge) -> ((Test_cnt.obl1.state=unsTermination) & (Test_cnt.pow0.state=sTermination)))
+
+		CTLSPEC NAME CTL120 := ((Test_cnt.obl12.state=violation) -> (Test_cnt.obl11.state=suspension)) & (EF(AG(Test_cnt.obl10.state=discharge)))
+
+		CTLSPEC NAME CTL121 := AF(AG((Test_cnt.obl5.state=unsTermination) -> (Test_cnt.obl9.state=suspension)))
+
+		CTLSPEC NAME CTL122 := AF((Test_cnt.obl11.state=inEffect) & (!(AF(Test_cnt.obl0.state=discharge))))
+
+		CTLSPEC NAME CTL123 := !(AG(!((!(Test_cnt.pow2.state=sTermination)) & (Test_cnt.pow7.state=sTermination))))
+
+		CTLSPEC NAME CTL124 := AF((Test_cnt.obl9.state=fulfillment) & (EG(Test_cnt.obl10.state=fulfillment)))
+
+		CTLSPEC NAME CTL125 := (EG(EF(Test_cnt.pow2.state=sTermination))) -> ((Test_cnt.obl11.state=discharge) | (Test_cnt.obl12.state=violation))
+
+		CTLSPEC NAME CTL126 := EG(((Test_cnt.obl3.state=unsTermination) & (EG(Test_cnt.obl7.state=discharge))) -> (Test_cnt.obl5.state=inEffect))
+
+		CTLSPEC NAME CTL127 := (Test_cnt.obl10.state=discharge) -> (EF((Test_cnt.obl2.state=inEffect) & (EG(Test_cnt.obl9.state=violation))))
+
+		CTLSPEC NAME CTL128 := (Test_cnt.obl5.state=discharge) -> (((Test_cnt.obl4.state=fulfillment) -> (Test_cnt.obl9.state=create)) -> (Test_cnt.obl1.state=suspension))
+
+		CTLSPEC NAME CTL129 := AG(AF((Test_cnt.obl7.state=violation) & (AG(AF(Test_cnt.pow6.state=sTermination)))))
+
+		CTLSPEC NAME CTL130 := EF((Test_cnt.obl8.state=inEffect) | ((Test_cnt.obl6.state=violation) & (!(Test_cnt.pow2.state=create))))
+
+		CTLSPEC NAME CTL131 := (Test_cnt.obl10.state=fulfillment) -> (!((Test_cnt.pow2.state=suspension) & (!(Test_cnt.pow6.state=unsTermination))))
+
+		CTLSPEC NAME CTL132 := EG((Test_cnt.obl2.state=suspension) | (EF(!(EG(Test_cnt.obl12.state=create)))))
+
+		CTLSPEC NAME CTL133 := EF((EF(Test_cnt.obl2.state=discharge)) & (!(EG(Test_cnt.obl9.state=create))))
+
+		CTLSPEC NAME CTL134 := (Test_cnt.pow7.state=unsTermination) & (AG(!(AG(Test_cnt.pow5.state=unsTermination))))
+
+		CTLSPEC NAME CTL135 := (EF((Test_cnt.obl5.state=create) & (!(Test_cnt.obl10.state=unsTermination)))) -> (Test_cnt.pow0.state=unsTermination)
+
+		CTLSPEC NAME CTL136 := AG((EF(Test_cnt.pow0.state=sTermination)) & (!(AF(Test_cnt.pow7.state=sTermination))))
+
+		CTLSPEC NAME CTL137 := AF((Test_cnt.obl1.state=unsTermination) & (Test_cnt.obl3.state=violation) & (AG(Test_cnt.obl7.state=discharge)))
+
+		CTLSPEC NAME CTL138 := ((Test_cnt.obl6.state=inEffect) | (Test_cnt.pow1.state=create)) & (!(AG(Test_cnt.pow6.state=unsTermination)))
+
+		CTLSPEC NAME CTL139 := !(AF((Test_cnt.obl4.state=fulfillment) | (AF(Test_cnt.obl5.state=suspension))))
+
+		CTLSPEC NAME CTL140 := EG(EF((!(Test_cnt.obl10.state=unsTermination)) | (Test_cnt.pow6.state=create)))
+
+		CTLSPEC NAME CTL141 := (Test_cnt.pow3.state=create) & (!(EG(!(EG(Test_cnt.obl3.state=create)))))
+
+		CTLSPEC NAME CTL142 := !((AG(Test_cnt.obl5.state=suspension)) -> ((Test_cnt.obl7.state=suspension) & (Test_cnt.pow6.state=sTermination)))
+
+		CTLSPEC NAME CTL143 := ((Test_cnt.obl0.state=fulfillment) | (Test_cnt.obl6.state=suspension)) & (AF(!(Test_cnt.obl3.state=violation)))
+
+		CTLSPEC NAME CTL144 := !(EF(AG(EF(!(Test_cnt.obl6.state=discharge)))))
+
+		CTLSPEC NAME CTL145 := !((!(Test_cnt.obl6.state=fulfillment)) & (Test_cnt.obl10.state=inEffect) & (Test_cnt.pow6.state=inEffect))
+
+		CTLSPEC NAME CTL146 := (AF(Test_cnt.pow5.state=inEffect)) -> (EF(EG(Test_cnt.obl4.state=fulfillment)))
+
+		CTLSPEC NAME CTL147 := (Test_cnt.pow3.state=unsTermination) & (EG((Test_cnt.obl4.state=inEffect) | (AF(Test_cnt.obl12.state=violation))))
+
+		CTLSPEC NAME CTL148 := (Test_cnt.obl4.state=fulfillment) & (Test_cnt.obl7.state=create) & (Test_cnt.obl9.state=create) & (Test_cnt.pow0.state=inEffect)
+
+		CTLSPEC NAME CTL149 := EG((!(Test_cnt.obl0.state=violation)) & (EF(Test_cnt.pow6.state=sTermination)))
+
+		CTLSPEC NAME CTL150 := (AF((Test_cnt.pow3.state=sTermination) -> (!(Test_cnt.pow7.state=create)))) -> (Test_cnt.pow1.state=unsTermination)
+
+		CTLSPEC NAME CTL151 := (Test_cnt.pow7.state=unsTermination) & (EF(Test_cnt.pow6.state=unsTermination)) & (AF(Test_cnt.obl4.state=create))
+
+		CTLSPEC NAME CTL152 := !((!(Test_cnt.obl8.state=unsTermination)) & (EF(EG(Test_cnt.pow7.state=sTermination))))
+
+		CTLSPEC NAME CTL153 := (!(Test_cnt.obl9.state=violation)) & (Test_cnt.obl10.state=unsTermination) & (!(Test_cnt.pow0.state=sTermination))
+
+		CTLSPEC NAME CTL154 := !(AG((Test_cnt.obl7.state=violation) | (AG(EF(Test_cnt.pow4.state=inEffect)))))
+
+		CTLSPEC NAME CTL155 := AF((AF(Test_cnt.obl5.state=create)) & (EG(Test_cnt.obl11.state=discharge)))
+
+		CTLSPEC NAME CTL156 := AG((EF(Test_cnt.obl5.state=inEffect)) & (EG(Test_cnt.pow1.state=suspension)))
+
+		CTLSPEC NAME CTL157 := ((Test_cnt.obl8.state=violation) -> (Test_cnt.obl3.state=suspension)) -> ((Test_cnt.obl4.state=unsTermination) | (Test_cnt.pow1.state=unsTermination))
+
+		CTLSPEC NAME CTL158 := EF((!(Test_cnt.obl1.state=violation)) & (AF(Test_cnt.pow4.state=unsTermination)))
+
+		CTLSPEC NAME CTL159 := ((Test_cnt.obl11.state=violation) & (Test_cnt.pow3.state=inEffect)) -> ((Test_cnt.pow0.state=sTermination) -> (Test_cnt.obl11.state=discharge))
+
+		CTLSPEC NAME CTL160 := (Test_cnt.obl11.state=unsTermination) & (Test_cnt.pow0.state=sTermination) & (Test_cnt.pow2.state=inEffect) & (Test_cnt.pow3.state=inEffect)
+
+		CTLSPEC NAME CTL161 := (Test_cnt.obl7.state=violation) & (!((AG(Test_cnt.pow0.state=inEffect)) -> (Test_cnt.obl1.state=violation)))
+
+		CTLSPEC NAME CTL162 := EG((Test_cnt.obl8.state=inEffect) -> ((Test_cnt.obl3.state=fulfillment) & (!(Test_cnt.obl9.state=violation))))
+
+		CTLSPEC NAME CTL163 := (EF(Test_cnt.obl8.state=discharge)) -> ((Test_cnt.obl2.state=create) & (!(Test_cnt.obl5.state=suspension)))
+
+		CTLSPEC NAME CTL164 := EG(EF((Test_cnt.pow3.state=sTermination) | (AG(Test_cnt.obl1.state=discharge))))
+
+		CTLSPEC NAME CTL165 := (EF(!(AG(Test_cnt.obl11.state=suspension)))) & (EF(Test_cnt.obl11.state=unsTermination))
+
+		CTLSPEC NAME CTL166 := AG((Test_cnt.pow0.state=inEffect) & ((Test_cnt.obl7.state=fulfillment) -> (Test_cnt.obl12.state=fulfillment)))
+
+		CTLSPEC NAME CTL167 := AF((EF(Test_cnt.obl11.state=violation)) -> (AG(Test_cnt.pow3.state=suspension)))
+
+		CTLSPEC NAME CTL168 := (Test_cnt.obl1.state=fulfillment) & (Test_cnt.obl10.state=discharge) & (AG(!(Test_cnt.obl11.state=violation)))
+
+		CTLSPEC NAME CTL169 := !((Test_cnt.pow7.state=inEffect) & (EG(AF(Test_cnt.pow0.state=inEffect))))
+
+		CTLSPEC NAME CTL170 := EG((Test_cnt.obl0.state=suspension) & ((EF(Test_cnt.obl6.state=violation)) -> (Test_cnt.obl6.state=fulfillment)))
+
+		CTLSPEC NAME CTL171 := (Test_cnt.obl1.state=inEffect) & (Test_cnt.obl2.state=suspension) & (Test_cnt.obl3.state=discharge) & (Test_cnt.pow6.state=suspension)
+
+		CTLSPEC NAME CTL172 := (Test_cnt.obl6.state=suspension) | ((!(Test_cnt.obl0.state=unsTermination)) -> (!(Test_cnt.obl4.state=violation)))
+
+		CTLSPEC NAME CTL173 := EF((EG((Test_cnt.obl1.state=inEffect) & (Test_cnt.obl7.state=inEffect))) -> (Test_cnt.obl5.state=inEffect))
+
+		CTLSPEC NAME CTL174 := AF((EF(Test_cnt.obl2.state=discharge)) & (!(EG(Test_cnt.obl7.state=violation))))
+
+		CTLSPEC NAME CTL175 := EF((Test_cnt.obl9.state=inEffect) & (Test_cnt.pow4.state=sTermination) & (AF(Test_cnt.obl6.state=discharge)))
+
+		CTLSPEC NAME CTL176 := EG((Test_cnt.obl0.state=suspension) & (Test_cnt.obl10.state=violation) & (Test_cnt.pow6.state=suspension))
+
+		CTLSPEC NAME CTL177 := EF((Test_cnt.obl8.state=violation) & ((Test_cnt.obl9.state=create) -> (EG(Test_cnt.obl8.state=suspension))))
+
+		CTLSPEC NAME CTL178 := EG(AF(EG((!(Test_cnt.obl2.state=unsTermination)) | (Test_cnt.obl6.state=inEffect))))
+
+		CTLSPEC NAME CTL179 := (!(Test_cnt.pow2.state=inEffect)) & (EF((Test_cnt.obl1.state=discharge) & (Test_cnt.obl12.state=suspension)))
+
+		CTLSPEC NAME CTL180 := EF(!(AG((Test_cnt.obl11.state=suspension) & (AF(Test_cnt.pow2.state=create)))))
+
+		CTLSPEC NAME CTL181 := (AF(!(Test_cnt.obl4.state=suspension))) & (EF(!(Test_cnt.obl9.state=violation)))
+
+		CTLSPEC NAME CTL182 := (!((Test_cnt.obl9.state=suspension) & (Test_cnt.obl12.state=suspension))) & (EF(Test_cnt.obl9.state=create))
+
+		CTLSPEC NAME CTL183 := !((Test_cnt.pow0.state=inEffect) & (EG((Test_cnt.obl4.state=violation) | (Test_cnt.obl11.state=unsTermination))))
+
+		CTLSPEC NAME CTL184 := (Test_cnt.obl5.state=discharge) & (Test_cnt.obl9.state=create) & (Test_cnt.obl12.state=fulfillment) & (Test_cnt.pow2.state=suspension)
+
+		CTLSPEC NAME CTL185 := ((Test_cnt.obl8.state=violation) -> (!(Test_cnt.obl7.state=suspension))) & (EF(Test_cnt.pow6.state=suspension))
+
+		CTLSPEC NAME CTL186 := (EF(Test_cnt.pow6.state=sTermination)) -> (!((Test_cnt.obl2.state=violation) & (Test_cnt.obl10.state=discharge)))
+
+		CTLSPEC NAME CTL187 := EF((!(Test_cnt.obl1.state=suspension)) & (Test_cnt.obl4.state=discharge) & (Test_cnt.obl4.state=violation))
+
+		CTLSPEC NAME CTL188 := (AF(Test_cnt.obl8.state=violation)) & (EF(!(EF(Test_cnt.obl5.state=create))))
+
+		CTLSPEC NAME CTL189 := (AG(Test_cnt.obl12.state=fulfillment)) -> ((Test_cnt.obl12.state=create) & (AG(Test_cnt.obl6.state=violation)))
+
+		CTLSPEC NAME CTL190 := (Test_cnt.pow0.state=create) & (AF(Test_cnt.pow3.state=unsTermination)) & (EG(Test_cnt.obl4.state=violation))
+
+		CTLSPEC NAME CTL191 := AF(((Test_cnt.obl1.state=create) | (Test_cnt.obl2.state=inEffect)) -> (Test_cnt.obl1.state=discharge))
+
+		CTLSPEC NAME CTL192 := (AG(EF(Test_cnt.pow7.state=create))) -> (Test_cnt.pow6.state=create)
+
+		CTLSPEC NAME CTL193 := EG((Test_cnt.obl8.state=fulfillment) & (!(Test_cnt.obl10.state=discharge)) & (Test_cnt.pow4.state=unsTermination))
+
+		CTLSPEC NAME CTL194 := !((Test_cnt.obl8.state=create) & (EG((Test_cnt.obl11.state=unsTermination) -> (Test_cnt.obl11.state=fulfillment))))
+
+		CTLSPEC NAME CTL195 := AG((AF((Test_cnt.pow3.state=unsTermination) | (Test_cnt.pow6.state=sTermination))) -> (Test_cnt.obl8.state=create))
+
+		CTLSPEC NAME CTL196 := AG((!(EG(Test_cnt.obl7.state=fulfillment))) & (AF(Test_cnt.pow0.state=suspension)))
+
+		CTLSPEC NAME CTL197 := (AF(Test_cnt.obl12.state=fulfillment)) & (EF((Test_cnt.obl0.state=discharge) & (Test_cnt.pow1.state=sTermination)))
+
+		CTLSPEC NAME CTL198 := (AF(Test_cnt.obl12.state=inEffect)) -> ((Test_cnt.pow3.state=sTermination) | (AF(Test_cnt.obl10.state=create)))
+
+		CTLSPEC NAME CTL199 := AF((EG(Test_cnt.pow6.state=suspension)) & (EG(Test_cnt.pow7.state=create)))
+
+		CTLSPEC NAME CTL200 := (Test_cnt.obl11.state=inEffect) | (AF(AG((Test_cnt.obl5.state=inEffect) & (Test_cnt.pow2.state=suspension))))
+
+		CTLSPEC NAME CTL201 := !((EF(Test_cnt.obl8.state=fulfillment)) -> (!(EG(Test_cnt.obl2.state=fulfillment))))
+
+		CTLSPEC NAME CTL202 := (!(Test_cnt.obl9.state=suspension)) & (Test_cnt.obl11.state=discharge) & (EF(Test_cnt.pow6.state=inEffect))
+
+		CTLSPEC NAME CTL203 := AF((Test_cnt.obl8.state=suspension) & (Test_cnt.pow7.state=sTermination) & (AF(Test_cnt.obl11.state=violation)))
+
+		CTLSPEC NAME CTL204 := AF((Test_cnt.pow6.state=sTermination) | ((Test_cnt.obl6.state=violation) -> (AF(Test_cnt.pow6.state=sTermination))))
+
+		CTLSPEC NAME CTL205 := (Test_cnt.pow3.state=unsTermination) -> ((Test_cnt.obl10.state=discharge) & (!(EG(Test_cnt.obl9.state=discharge))))
+
+		CTLSPEC NAME CTL206 := (Test_cnt.obl4.state=suspension) & (Test_cnt.pow3.state=unsTermination) & ((Test_cnt.pow1.state=sTermination) -> (Test_cnt.pow7.state=sTermination))
+
+		CTLSPEC NAME CTL207 := EF(((Test_cnt.pow3.state=sTermination) -> (Test_cnt.obl3.state=inEffect)) & (AF(Test_cnt.obl1.state=inEffect)))
+
+		CTLSPEC NAME CTL208 := AF(!((Test_cnt.pow7.state=suspension) & ((Test_cnt.pow1.state=inEffect) | (Test_cnt.pow6.state=suspension))))
+
+		CTLSPEC NAME CTL209 := AG((Test_cnt.pow0.state=sTermination) -> (AG(Test_cnt.obl6.state=discharge)))
+
+		CTLSPEC NAME CTL210 := (Test_cnt.obl0.state=suspension) & (EG(Test_cnt.obl0.state=violation))
+
+		CTLSPEC NAME CTL211 := AF((Test_cnt.pow7.state=create) -> (!((Test_cnt.obl10.state=suspension) & (Test_cnt.pow6.state=sTermination))))
+
+		CTLSPEC NAME CTL212 := ((AF(Test_cnt.obl5.state=fulfillment)) -> (AF(Test_cnt.pow1.state=unsTermination))) -> (Test_cnt.obl3.state=fulfillment)
+
+		CTLSPEC NAME CTL213 := (!((Test_cnt.pow6.state=unsTermination) -> (Test_cnt.obl4.state=fulfillment))) | (EF(Test_cnt.obl11.state=suspension))
+
+		CTLSPEC NAME CTL214 := EF(EG(!((Test_cnt.pow5.state=suspension) -> (!(Test_cnt.obl12.state=create)))))
+
+		CTLSPEC NAME CTL215 := (Test_cnt.obl8.state=suspension) | ((!(Test_cnt.obl1.state=create)) & (AF(Test_cnt.obl7.state=unsTermination)))
+
+		CTLSPEC NAME CTL216 := (AF(EG(Test_cnt.obl4.state=fulfillment))) -> (!(Test_cnt.obl9.state=inEffect))
+
+		CTLSPEC NAME CTL217 := AF(((Test_cnt.obl2.state=fulfillment) -> (Test_cnt.obl7.state=create)) | (AF(Test_cnt.obl3.state=discharge)))
+
+		CTLSPEC NAME CTL218 := ((Test_cnt.obl12.state=inEffect) & (Test_cnt.pow0.state=suspension)) -> (Test_cnt.obl2.state=create)
+
+		CTLSPEC NAME CTL219 := EG((Test_cnt.pow5.state=inEffect) & (!((Test_cnt.obl4.state=discharge) | (Test_cnt.pow0.state=suspension))))
+
+		CTLSPEC NAME CTL220 := ((AG(Test_cnt.obl10.state=inEffect)) -> (AF(Test_cnt.obl1.state=suspension))) -> (Test_cnt.obl8.state=fulfillment)
+
+		CTLSPEC NAME CTL221 := (Test_cnt.obl6.state=violation) & (Test_cnt.obl11.state=discharge) & (Test_cnt.pow6.state=unsTermination) & (Test_cnt.pow7.state=sTermination)
+
+		CTLSPEC NAME CTL222 := AF((Test_cnt.obl6.state=discharge) & (Test_cnt.pow1.state=sTermination) & (EF(Test_cnt.obl11.state=discharge)))
+
+		CTLSPEC NAME CTL223 := EF(AG((Test_cnt.obl3.state=create) & (Test_cnt.obl6.state=create)))
+
+		CTLSPEC NAME CTL224 := (Test_cnt.obl1.state=discharge) & (Test_cnt.obl2.state=inEffect) & (AF(!(Test_cnt.obl1.state=discharge)))
+
+		CTLSPEC NAME CTL225 := EG((!(Test_cnt.obl4.state=suspension)) -> ((Test_cnt.obl6.state=inEffect) & (Test_cnt.pow0.state=sTermination)))
+
+		CTLSPEC NAME CTL226 := (AG(Test_cnt.obl12.state=suspension)) -> (EG(EF(Test_cnt.obl12.state=inEffect)))
+
+		CTLSPEC NAME CTL227 := (EG((Test_cnt.obl12.state=violation) & (!(Test_cnt.pow4.state=unsTermination)))) -> (Test_cnt.obl0.state=inEffect)
+
+		CTLSPEC NAME CTL228 := (EG((Test_cnt.obl10.state=unsTermination) & (Test_cnt.obl11.state=violation))) -> (EF(Test_cnt.obl6.state=violation))
+
+		CTLSPEC NAME CTL229 := EF((Test_cnt.obl3.state=violation) & (Test_cnt.obl4.state=create) & (!(Test_cnt.pow4.state=suspension)))
+
+		CTLSPEC NAME CTL230 := (AF(!(Test_cnt.obl12.state=violation))) -> ((Test_cnt.obl8.state=violation) & (Test_cnt.pow0.state=suspension))
+
+		CTLSPEC NAME CTL231 := (Test_cnt.obl4.state=discharge) -> (((Test_cnt.obl4.state=violation) -> (Test_cnt.pow7.state=inEffect)) -> (Test_cnt.pow5.state=create))
+
+		CTLSPEC NAME CTL232 := AG((Test_cnt.obl7.state=inEffect) | (EG(EF(EG(Test_cnt.pow0.state=sTermination)))))
+
+		CTLSPEC NAME CTL233 := (EF(AG(Test_cnt.pow5.state=unsTermination))) -> (EG(Test_cnt.obl1.state=fulfillment))
+
+		CTLSPEC NAME CTL234 := ((Test_cnt.obl1.state=discharge) | (AF(Test_cnt.obl7.state=discharge))) & (AG(Test_cnt.obl7.state=inEffect))
+
+		CTLSPEC NAME CTL235 := !(AG((Test_cnt.obl2.state=suspension) -> (EF(EG(Test_cnt.obl8.state=suspension)))))
+
+		CTLSPEC NAME CTL236 := AG(!(Test_cnt.pow5.state=suspension))
+
+		CTLSPEC NAME CTL237 := EF(!(AF((Test_cnt.obl4.state=inEffect) & (AF(Test_cnt.obl12.state=create)))))
+
+		CTLSPEC NAME CTL238 := (EF(Test_cnt.obl3.state=inEffect)) & ((Test_cnt.obl12.state=violation) -> (EG(Test_cnt.obl9.state=fulfillment)))
+
+		CTLSPEC NAME CTL239 := AG(AF((Test_cnt.obl4.state=fulfillment) & (AF(Test_cnt.obl0.state=suspension))))
+
+		CTLSPEC NAME CTL240 := EF((Test_cnt.pow1.state=create) & (Test_cnt.pow4.state=unsTermination) & (AG(Test_cnt.obl0.state=create)))
+
+		CTLSPEC NAME CTL241 := (!(Test_cnt.obl6.state=create)) & (!((Test_cnt.obl2.state=violation) -> (Test_cnt.pow7.state=unsTermination)))
+
+		CTLSPEC NAME CTL242 := AF((Test_cnt.obl10.state=discharge) & ((Test_cnt.pow2.state=suspension) -> (AF(Test_cnt.obl3.state=suspension))))
+
+		CTLSPEC NAME CTL243 := AG(!((Test_cnt.obl2.state=violation) & (EF(EG(Test_cnt.obl10.state=discharge)))))
+
+		CTLSPEC NAME CTL244 := !((Test_cnt.pow4.state=inEffect) | (AG((Test_cnt.obl0.state=violation) & (Test_cnt.obl8.state=suspension))))
+
+		CTLSPEC NAME CTL245 := EF(EG((Test_cnt.pow6.state=inEffect) -> (EF(Test_cnt.obl3.state=inEffect))))
+
+		CTLSPEC NAME CTL246 := EG((Test_cnt.obl11.state=fulfillment) & (!((Test_cnt.obl0.state=fulfillment) & (Test_cnt.obl6.state=fulfillment))))
+
+		CTLSPEC NAME CTL247 := AF(AG((Test_cnt.obl4.state=inEffect) & (Test_cnt.obl5.state=violation) & (Test_cnt.obl6.state=discharge)))
+
+		CTLSPEC NAME CTL248 := ((Test_cnt.pow1.state=unsTermination) -> (Test_cnt.obl6.state=fulfillment)) & (!(AF(Test_cnt.obl3.state=unsTermination)))
+
+		CTLSPEC NAME CTL249 := ((Test_cnt.obl5.state=fulfillment) & (AF(Test_cnt.pow1.state=sTermination))) -> (AF(Test_cnt.pow3.state=suspension))
+
+		CTLSPEC NAME CTL250 := AF(((Test_cnt.obl6.state=unsTermination) & (EG(Test_cnt.obl10.state=suspension))) -> (Test_cnt.obl0.state=create))
+
+		CTLSPEC NAME CTL251 := (AF(!(Test_cnt.pow2.state=inEffect))) -> ((Test_cnt.obl0.state=discharge) & (Test_cnt.obl11.state=create))
+
+		CTLSPEC NAME CTL252 := EF((Test_cnt.obl1.state=unsTermination) & (Test_cnt.obl5.state=fulfillment) & (EG(Test_cnt.pow1.state=suspension)))
+
+		CTLSPEC NAME CTL253 := AG((EG(Test_cnt.obl6.state=discharge)) -> (AG(Test_cnt.pow7.state=inEffect)))
+
+		CTLSPEC NAME CTL254 := AF((AF(Test_cnt.pow6.state=unsTermination)) -> ((Test_cnt.pow0.state=inEffect) & (Test_cnt.pow1.state=inEffect)))
+
+		CTLSPEC NAME CTL255 := !(EF((Test_cnt.obl6.state=inEffect) & ((Test_cnt.pow1.state=suspension) -> (Test_cnt.obl7.state=fulfillment))))
+
+		CTLSPEC NAME CTL256 := EG(!(AG(EF(Test_cnt.obl8.state=discharge))))
+
+		CTLSPEC NAME CTL257 := !((Test_cnt.obl11.state=suspension) & (EF(Test_cnt.obl11.state=unsTermination)))
+
+		CTLSPEC NAME CTL258 := (!((!(Test_cnt.obl9.state=violation)) & (Test_cnt.obl12.state=inEffect))) -> (Test_cnt.obl8.state=inEffect)
+
+		CTLSPEC NAME CTL259 := AG((!(Test_cnt.obl0.state=create)) -> (Test_cnt.pow3.state=suspension))
+
+		CTLSPEC NAME CTL260 := (Test_cnt.obl7.state=create) & (EG((Test_cnt.obl3.state=fulfillment) & (EG(Test_cnt.pow4.state=sTermination))))
+
+		CTLSPEC NAME CTL261 := EG(((Test_cnt.obl7.state=create) & (Test_cnt.obl8.state=discharge)) -> (AF(Test_cnt.obl4.state=inEffect)))
+
+		CTLSPEC NAME CTL262 := AF(!((Test_cnt.obl6.state=violation) & (!(EF(Test_cnt.pow7.state=create)))))
+
+		CTLSPEC NAME CTL263 := ((Test_cnt.obl0.state=suspension) & (Test_cnt.obl11.state=unsTermination)) | ((Test_cnt.obl0.state=suspension) & (Test_cnt.pow2.state=suspension))
+
+		CTLSPEC NAME CTL264 := !(((Test_cnt.obl4.state=create) -> (Test_cnt.obl12.state=create)) | (AF(Test_cnt.obl10.state=create)))
+
+		CTLSPEC NAME CTL265 := (EF(Test_cnt.obl7.state=inEffect)) & (AG(!(Test_cnt.obl0.state=unsTermination)))
+
+		CTLSPEC NAME CTL266 := !(((Test_cnt.obl10.state=create) & (Test_cnt.obl11.state=fulfillment)) | (EF(Test_cnt.obl5.state=unsTermination)))
+
+		CTLSPEC NAME CTL267 := AF(EG((!(Test_cnt.pow2.state=suspension)) & (AF(Test_cnt.pow3.state=inEffect))))
+
+		CTLSPEC NAME CTL268 := EF(!((Test_cnt.obl3.state=unsTermination) -> (AG(AF(Test_cnt.obl7.state=violation)))))
+
+		CTLSPEC NAME CTL269 := !((Test_cnt.obl0.state=unsTermination) & (Test_cnt.obl12.state=create) & (EF(Test_cnt.obl5.state=discharge)))
+
+		CTLSPEC NAME CTL270 := (Test_cnt.obl5.state=violation) | (AG(!(EG(AF(Test_cnt.obl1.state=fulfillment)))))
+
+		CTLSPEC NAME CTL271 := (!(Test_cnt.obl10.state=suspension)) & ((AG(Test_cnt.pow6.state=create)) -> (Test_cnt.obl2.state=fulfillment))
+
+		CTLSPEC NAME CTL272 := ((Test_cnt.obl1.state=fulfillment) -> (AF(Test_cnt.obl12.state=violation))) -> (!(Test_cnt.obl5.state=fulfillment))
+
+		CTLSPEC NAME CTL273 := (AF(Test_cnt.obl2.state=inEffect)) & (AG((Test_cnt.obl3.state=fulfillment) | (Test_cnt.obl8.state=unsTermination)))
+
+		CTLSPEC NAME CTL274 := EF((EG(Test_cnt.obl1.state=fulfillment)) -> (AG(Test_cnt.obl1.state=discharge)))
+
+		CTLSPEC NAME CTL275 := AF(((Test_cnt.obl6.state=inEffect) -> (Test_cnt.obl0.state=unsTermination)) & (EG(Test_cnt.obl4.state=violation)))
+
+		CTLSPEC NAME CTL276 := (!(Test_cnt.obl3.state=inEffect)) & (AF((Test_cnt.obl3.state=suspension) -> (Test_cnt.obl8.state=unsTermination)))
+
+		CTLSPEC NAME CTL277 := AF(!((!(Test_cnt.obl1.state=fulfillment)) & (Test_cnt.obl3.state=unsTermination)))
+
+		CTLSPEC NAME CTL278 := AF((Test_cnt.obl11.state=unsTermination) & (EG((Test_cnt.pow5.state=suspension) -> (Test_cnt.obl12.state=discharge))))
+
+		CTLSPEC NAME CTL279 := !((Test_cnt.obl0.state=violation) & ((Test_cnt.obl4.state=discharge) -> (AF(Test_cnt.obl9.state=create))))
+
+		CTLSPEC NAME CTL280 := EF(AG((Test_cnt.obl8.state=create) -> (AG(!(Test_cnt.obl8.state=violation)))))
+
+		CTLSPEC NAME CTL281 := (Test_cnt.pow6.state=unsTermination) & ((Test_cnt.obl11.state=fulfillment) | ((Test_cnt.obl1.state=suspension) & (Test_cnt.pow7.state=sTermination)))
+
+		CTLSPEC NAME CTL282 := (AF(Test_cnt.obl5.state=inEffect)) & (EG(!(EF(Test_cnt.pow2.state=sTermination))))
+
+		CTLSPEC NAME CTL283 := (Test_cnt.obl10.state=violation) & (!(Test_cnt.pow2.state=suspension)) & (EF(Test_cnt.obl8.state=create))
+
+		CTLSPEC NAME CTL284 := !(EG((!(Test_cnt.obl10.state=suspension)) & (EF(Test_cnt.pow7.state=unsTermination))))
+
+		CTLSPEC NAME CTL285 := EF(((Test_cnt.obl4.state=violation) -> (Test_cnt.obl1.state=create)) & (EF(Test_cnt.pow4.state=unsTermination)))
+
+		CTLSPEC NAME CTL286 := (Test_cnt.obl11.state=create) & (Test_cnt.pow6.state=sTermination) & (!(EG(Test_cnt.obl11.state=inEffect)))
+
+		CTLSPEC NAME CTL287 := ((Test_cnt.obl4.state=fulfillment) & (Test_cnt.pow4.state=unsTermination) & (Test_cnt.pow5.state=unsTermination)) -> (Test_cnt.pow2.state=sTermination)
+
+		CTLSPEC NAME CTL288 := !(((Test_cnt.obl11.state=unsTermination) -> (EF(Test_cnt.pow0.state=sTermination))) -> (Test_cnt.pow4.state=unsTermination))
+
+		CTLSPEC NAME CTL289 := EF(AG((Test_cnt.obl8.state=fulfillment) & (EF(Test_cnt.obl9.state=violation))))
+
+		CTLSPEC NAME CTL290 := (EG(Test_cnt.obl4.state=suspension)) & (AG(Test_cnt.obl8.state=unsTermination))
+
+		CTLSPEC NAME CTL291 := (Test_cnt.obl6.state=discharge) & (Test_cnt.obl7.state=create) & (Test_cnt.obl12.state=create) & (Test_cnt.pow2.state=suspension)
+
+		CTLSPEC NAME CTL292 := AF((Test_cnt.obl9.state=suspension) | (AF(Test_cnt.obl7.state=unsTermination)))
+
+		CTLSPEC NAME CTL293 := !((!(Test_cnt.obl3.state=suspension)) & ((Test_cnt.obl12.state=create) -> (Test_cnt.obl0.state=unsTermination)))
+
+		CTLSPEC NAME CTL294 := (!(Test_cnt.obl11.state=unsTermination)) & (EF(EG(Test_cnt.obl12.state=suspension)))
+
+		CTLSPEC NAME CTL295 := AF((AF(Test_cnt.obl9.state=fulfillment)) | (AG(Test_cnt.obl11.state=fulfillment)))
+
+		CTLSPEC NAME CTL296 := (EF((Test_cnt.obl6.state=inEffect) -> (Test_cnt.obl2.state=inEffect))) & (AF(Test_cnt.obl1.state=discharge))
+
+		CTLSPEC NAME CTL297 := AG((AF(Test_cnt.pow4.state=suspension)) -> (!(AF(Test_cnt.obl0.state=inEffect))))
+
+		CTLSPEC NAME CTL298 := ((Test_cnt.obl8.state=inEffect) -> (AF(AG(Test_cnt.obl6.state=discharge)))) -> (Test_cnt.obl11.state=violation)
+
+		CTLSPEC NAME CTL299 := (Test_cnt.obl1.state=create) & (Test_cnt.obl12.state=violation) & (AF(Test_cnt.obl1.state=fulfillment))
+
+		CTLSPEC NAME CTL300 := AF((Test_cnt.obl8.state=suspension) & (Test_cnt.obl12.state=create) & (Test_cnt.pow7.state=sTermination))
+
+		CTLSPEC NAME CTL301 := !(AG(EF((Test_cnt.obl1.state=create) & (Test_cnt.pow7.state=inEffect))))
+
+		CTLSPEC NAME CTL302 := (AF(Test_cnt.pow7.state=sTermination)) & (AG(Test_cnt.pow0.state=sTermination))
+
+		CTLSPEC NAME CTL303 := (Test_cnt.pow4.state=sTermination) & (AG(AF(EG(Test_cnt.pow4.state=suspension))))
+
+		CTLSPEC NAME CTL304 := AF(!((Test_cnt.obl5.state=suspension) & (Test_cnt.obl6.state=discharge)))
+
+		CTLSPEC NAME CTL305 := EF((EF(Test_cnt.obl12.state=suspension)) & (EF(Test_cnt.obl0.state=create)))
+
+		CTLSPEC NAME CTL306 := !((EG(Test_cnt.obl2.state=discharge)) & (EF(Test_cnt.obl3.state=inEffect)))
+
+		CTLSPEC NAME CTL307 := (EG(Test_cnt.obl6.state=create)) | ((EG(Test_cnt.pow3.state=unsTermination)) -> (Test_cnt.obl6.state=create))
+
+		CTLSPEC NAME CTL308 := EF((Test_cnt.pow7.state=unsTermination) -> (!(EF(AG(Test_cnt.obl8.state=discharge)))))
+
+		CTLSPEC NAME CTL309 := (EG(Test_cnt.pow2.state=sTermination)) & (AG(Test_cnt.obl0.state=inEffect))
+
+		CTLSPEC NAME CTL310 := AG((Test_cnt.obl2.state=unsTermination) -> ((Test_cnt.pow1.state=sTermination) & (AG(Test_cnt.obl4.state=unsTermination))))
+
+		CTLSPEC NAME CTL311 := (Test_cnt.obl10.state=create) & (Test_cnt.obl10.state=discharge) & ((Test_cnt.pow2.state=unsTermination) -> (Test_cnt.obl5.state=fulfillment))
+
+		CTLSPEC NAME CTL312 := !(AG((Test_cnt.obl0.state=fulfillment) & (Test_cnt.obl12.state=fulfillment)))
+
+		CTLSPEC NAME CTL313 := !(EF((Test_cnt.obl10.state=create) & ((Test_cnt.pow3.state=create) -> (Test_cnt.obl0.state=unsTermination))))
+
+		CTLSPEC NAME CTL314 := !(((Test_cnt.obl10.state=inEffect) & (Test_cnt.pow4.state=sTermination)) -> (EG(Test_cnt.obl5.state=suspension)))
+
+		CTLSPEC NAME CTL315 := EG((!(AF(Test_cnt.obl4.state=suspension))) & (AG(Test_cnt.obl12.state=unsTermination)))
+
+		CTLSPEC NAME CTL316 := (AG(Test_cnt.obl11.state=unsTermination)) -> (AF(Test_cnt.obl6.state=violation))
+
+		CTLSPEC NAME CTL317 := AF((Test_cnt.pow1.state=unsTermination) & ((!(Test_cnt.obl6.state=suspension)) -> (Test_cnt.obl8.state=inEffect)))
+
+		CTLSPEC NAME CTL318 := AF((Test_cnt.pow4.state=suspension) & (AF((Test_cnt.obl0.state=suspension) & (Test_cnt.pow5.state=suspension))))
+
+		CTLSPEC NAME CTL319 := !((EG(AF(Test_cnt.obl7.state=inEffect))) -> (EG(Test_cnt.obl10.state=fulfillment)))
+
+		CTLSPEC NAME CTL320 := (Test_cnt.pow4.state=inEffect) | (EF((Test_cnt.obl2.state=inEffect) & (AF(Test_cnt.obl6.state=unsTermination))))
+
+		CTLSPEC NAME CTL321 := EG((!(Test_cnt.obl2.state=suspension)) & (!(AG(Test_cnt.pow4.state=unsTermination))))
+
+		CTLSPEC NAME CTL322 := (!(Test_cnt.obl2.state=violation)) & (Test_cnt.obl3.state=suspension) & (EF(Test_cnt.pow5.state=sTermination))
+
+		CTLSPEC NAME CTL323 := (!(Test_cnt.obl8.state=create)) & (Test_cnt.pow4.state=unsTermination) & (AF(Test_cnt.pow7.state=inEffect))
+
+		CTLSPEC NAME CTL324 := EG(EF((Test_cnt.pow1.state=inEffect) | ((Test_cnt.pow6.state=inEffect) -> (Test_cnt.obl4.state=fulfillment))))
+
+		CTLSPEC NAME CTL325 := (Test_cnt.obl5.state=violation) & (!(EF(Test_cnt.obl7.state=inEffect)))
+
+		CTLSPEC NAME CTL326 := !(AG((!(Test_cnt.pow7.state=create)) & (AG(Test_cnt.obl6.state=inEffect))))
+
+		CTLSPEC NAME CTL327 := EF((Test_cnt.obl1.state=violation) & (Test_cnt.obl3.state=suspension) & (EG(Test_cnt.pow4.state=unsTermination)))
+
+		CTLSPEC NAME CTL328 := (Test_cnt.obl10.state=discharge) -> ((Test_cnt.obl4.state=inEffect) | ((Test_cnt.obl2.state=unsTermination) & (Test_cnt.obl4.state=suspension)))
+
+		CTLSPEC NAME CTL329 := EG((!(Test_cnt.pow2.state=suspension)) & ((Test_cnt.obl11.state=unsTermination) -> (Test_cnt.obl7.state=discharge)))
+
+		CTLSPEC NAME CTL330 := (EF(Test_cnt.obl8.state=create)) & ((Test_cnt.pow6.state=unsTermination) -> (EG(Test_cnt.pow6.state=inEffect)))
+
+		CTLSPEC NAME CTL331 := (EG(Test_cnt.pow1.state=inEffect)) & (AG(Test_cnt.obl0.state=suspension))
+
+		CTLSPEC NAME CTL332 := !(AG(!((Test_cnt.obl1.state=fulfillment) & (AF(Test_cnt.obl3.state=violation)))))
+
+		CTLSPEC NAME CTL333 := AF((Test_cnt.pow4.state=sTermination) & (EG(Test_cnt.obl8.state=discharge)))
+
+		CTLSPEC NAME CTL334 := EG(((Test_cnt.obl1.state=fulfillment) & (AG(Test_cnt.pow5.state=sTermination))) -> (Test_cnt.obl9.state=inEffect))
+
+		CTLSPEC NAME CTL335 := !(EG(Test_cnt.obl2.state=discharge))
+
+		CTLSPEC NAME CTL336 := ((Test_cnt.obl2.state=violation) & (Test_cnt.obl6.state=suspension)) | ((Test_cnt.obl1.state=discharge) & (Test_cnt.obl9.state=violation))
+
+		CTLSPEC NAME CTL337 := !((Test_cnt.obl0.state=suspension) | ((!(Test_cnt.obl8.state=suspension)) -> (Test_cnt.pow4.state=create)))
+
+		CTLSPEC NAME CTL338 := AF((!(Test_cnt.pow3.state=create)) & (EG(Test_cnt.obl3.state=unsTermination)))
+
+		CTLSPEC NAME CTL339 := EF((EF(Test_cnt.obl8.state=discharge)) & (AG(AF(Test_cnt.obl9.state=violation))))
+
+		CTLSPEC NAME CTL340 := (Test_cnt.obl6.state=create) | (EF((Test_cnt.obl3.state=discharge) & (Test_cnt.pow7.state=create)))
+
+		CTLSPEC NAME CTL341 := (AG(Test_cnt.pow1.state=inEffect)) -> (EF(Test_cnt.obl0.state=unsTermination))
+
+		CTLSPEC NAME CTL342 := EF(EG((Test_cnt.pow1.state=unsTermination) | ((Test_cnt.obl2.state=suspension) -> (Test_cnt.obl9.state=create))))
+
+		CTLSPEC NAME CTL343 := (AF(AG(Test_cnt.pow4.state=unsTermination))) | (AG(!(Test_cnt.obl5.state=violation)))
+
+		CTLSPEC NAME CTL344 := EF(AG((Test_cnt.obl3.state=violation) & (!(AF(Test_cnt.obl6.state=inEffect)))))
+
+		CTLSPEC NAME CTL345 := EF(!((Test_cnt.obl6.state=create) & (AF(Test_cnt.obl2.state=discharge))))
+
+		CTLSPEC NAME CTL346 := (((Test_cnt.obl0.state=suspension) -> (Test_cnt.obl7.state=unsTermination)) -> (Test_cnt.pow2.state=sTermination)) -> (Test_cnt.pow2.state=sTermination)
+
+		CTLSPEC NAME CTL347 := (Test_cnt.obl4.state=suspension) -> (EF(!((Test_cnt.obl1.state=discharge) & (Test_cnt.obl1.state=unsTermination))))
+
+		CTLSPEC NAME CTL348 := (!(Test_cnt.obl0.state=create)) | ((Test_cnt.obl11.state=discharge) & (EG(Test_cnt.pow7.state=inEffect)))
+
+		CTLSPEC NAME CTL349 := AF(!((AF(Test_cnt.pow4.state=suspension)) -> (AF(Test_cnt.pow3.state=unsTermination))))
+
+		CTLSPEC NAME CTL350 := EG((Test_cnt.obl2.state=fulfillment) | (!((Test_cnt.obl6.state=violation) & (Test_cnt.pow3.state=create))))
+
+		CTLSPEC NAME CTL351 := EG(!((EG(Test_cnt.obl1.state=inEffect)) & (EF(Test_cnt.obl11.state=unsTermination))))
+
+		CTLSPEC NAME CTL352 := !(AG((EG(Test_cnt.pow7.state=create)) | (AF(Test_cnt.obl8.state=suspension))))
+
+		CTLSPEC NAME CTL353 := (Test_cnt.obl3.state=discharge) & (Test_cnt.obl10.state=fulfillment) & ((Test_cnt.obl3.state=discharge) | (Test_cnt.pow0.state=sTermination))
+
+		CTLSPEC NAME CTL354 := AF((!(Test_cnt.obl4.state=unsTermination)) & (EF(Test_cnt.obl5.state=suspension)))
+
+		CTLSPEC NAME CTL355 := ((Test_cnt.pow3.state=sTermination) -> (Test_cnt.obl6.state=unsTermination)) & (!(EG(Test_cnt.obl7.state=inEffect)))
+
+		CTLSPEC NAME CTL356 := AF((Test_cnt.obl1.state=create) | (EF(Test_cnt.pow7.state=suspension)))
+
+		CTLSPEC NAME CTL357 := (Test_cnt.obl12.state=violation) | (Test_cnt.pow0.state=create) | (!(EF(Test_cnt.obl1.state=violation)))
+
+		CTLSPEC NAME CTL358 := (AF((Test_cnt.obl7.state=fulfillment) | (Test_cnt.obl10.state=inEffect))) -> (!(Test_cnt.pow2.state=create))
+
+		CTLSPEC NAME CTL359 := !((!(Test_cnt.obl1.state=suspension)) | ((Test_cnt.obl2.state=inEffect) & (Test_cnt.pow3.state=sTermination)))
+
+		CTLSPEC NAME CTL360 := ((Test_cnt.pow5.state=inEffect) -> (!(Test_cnt.obl2.state=fulfillment))) | (AG(Test_cnt.obl2.state=create))
+
+		CTLSPEC NAME CTL361 := (!(Test_cnt.pow7.state=sTermination)) | ((EF(Test_cnt.obl0.state=discharge)) -> (Test_cnt.pow0.state=sTermination))
+
+		CTLSPEC NAME CTL362 := AG(((Test_cnt.obl9.state=suspension) & (Test_cnt.pow7.state=suspension)) -> (!(Test_cnt.obl3.state=violation)))
+
+		CTLSPEC NAME CTL363 := EG(EF((Test_cnt.obl1.state=inEffect) & (!(Test_cnt.pow4.state=suspension))))
+
+		CTLSPEC NAME CTL364 := AF((Test_cnt.obl3.state=discharge) & (Test_cnt.obl9.state=unsTermination) & (!(Test_cnt.obl12.state=discharge)))
+
+		CTLSPEC NAME CTL365 := EF(EG((AF(Test_cnt.obl5.state=suspension)) | (EG(Test_cnt.pow3.state=unsTermination))))
+
+		CTLSPEC NAME CTL366 := (Test_cnt.obl9.state=fulfillment) -> (AF(AG((Test_cnt.obl8.state=unsTermination) & (Test_cnt.pow3.state=inEffect))))
+
+		CTLSPEC NAME CTL367 := EF((!(Test_cnt.obl2.state=inEffect)) & (!(Test_cnt.obl4.state=discharge)))
+
+		CTLSPEC NAME CTL368 := !((!(Test_cnt.obl1.state=suspension)) | (EF(!(Test_cnt.pow2.state=unsTermination))))
+
+		CTLSPEC NAME CTL369 := (Test_cnt.obl11.state=inEffect) & (((Test_cnt.obl3.state=create) & (Test_cnt.pow7.state=create)) -> (Test_cnt.obl3.state=inEffect))
+
+		CTLSPEC NAME CTL370 := (AF(Test_cnt.obl1.state=discharge)) -> (EF((Test_cnt.obl10.state=create) -> (Test_cnt.obl3.state=unsTermination)))
+
+		CTLSPEC NAME CTL371 := (!(EF(Test_cnt.obl11.state=violation))) & (EG(EF(Test_cnt.obl0.state=unsTermination)))
+
+		CTLSPEC NAME CTL372 := (!(Test_cnt.obl7.state=fulfillment)) & (!(EF(Test_cnt.obl4.state=fulfillment)))
+
+		CTLSPEC NAME CTL373 := (EG((Test_cnt.pow1.state=sTermination) | (EF(Test_cnt.pow7.state=unsTermination)))) -> (Test_cnt.obl3.state=discharge)
+
+		CTLSPEC NAME CTL374 := (AF(Test_cnt.obl12.state=violation)) & (!(AF(!(Test_cnt.obl2.state=discharge))))
+
+		CTLSPEC NAME CTL375 := (AF(Test_cnt.obl6.state=suspension)) & (AF(!(AF(Test_cnt.obl6.state=create))))
+
+		CTLSPEC NAME CTL376 := (Test_cnt.pow2.state=inEffect) | (EG(Test_cnt.obl1.state=fulfillment)) | (EF(Test_cnt.obl8.state=fulfillment))
+
+		CTLSPEC NAME CTL377 := EF(!((Test_cnt.pow0.state=unsTermination) | ((Test_cnt.pow5.state=suspension) -> (Test_cnt.obl4.state=discharge))))
+
+		CTLSPEC NAME CTL378 := (Test_cnt.obl1.state=create) & (Test_cnt.pow1.state=unsTermination) & (AG(Test_cnt.obl3.state=discharge))
+
+		CTLSPEC NAME CTL379 := EG(((Test_cnt.pow0.state=suspension) -> (Test_cnt.obl1.state=suspension)) | (EF(Test_cnt.obl8.state=unsTermination)))
+
+		CTLSPEC NAME CTL380 := (Test_cnt.obl5.state=unsTermination) & (AF(Test_cnt.pow7.state=suspension)) & (AG(Test_cnt.obl4.state=violation))
+
+		CTLSPEC NAME CTL381 := (Test_cnt.pow0.state=create) & (EG(Test_cnt.obl10.state=fulfillment)) & (AG(Test_cnt.pow4.state=sTermination))
+
+		CTLSPEC NAME CTL382 := ((Test_cnt.pow1.state=inEffect) | (AF(Test_cnt.obl2.state=create))) -> (AG(Test_cnt.obl0.state=violation))
+
+		CTLSPEC NAME CTL383 := (Test_cnt.obl9.state=fulfillment) & (Test_cnt.pow7.state=inEffect) & (AF(EG(Test_cnt.obl8.state=discharge)))
+
+		CTLSPEC NAME CTL384 := !(AG((!(Test_cnt.pow4.state=suspension)) & (EF(Test_cnt.pow3.state=suspension))))
+
+		CTLSPEC NAME CTL385 := (!(Test_cnt.obl5.state=suspension)) | ((Test_cnt.pow5.state=inEffect) -> (EF(Test_cnt.obl9.state=discharge)))
+
+		CTLSPEC NAME CTL386 := (Test_cnt.obl0.state=inEffect) & (Test_cnt.obl6.state=violation) & (Test_cnt.pow3.state=create) & (Test_cnt.pow7.state=create)
+
+		CTLSPEC NAME CTL387 := (Test_cnt.obl7.state=discharge) & (EF((Test_cnt.obl12.state=unsTermination) & (EG(Test_cnt.obl7.state=unsTermination))))
+
+		CTLSPEC NAME CTL388 := EF(!((Test_cnt.obl10.state=inEffect) & (Test_cnt.obl12.state=fulfillment)))
+
+		CTLSPEC NAME CTL389 := AF((!(Test_cnt.obl8.state=create)) & (!(EF(Test_cnt.pow3.state=unsTermination))))
+
+		CTLSPEC NAME CTL390 := (Test_cnt.obl8.state=fulfillment) | (AG(Test_cnt.pow6.state=suspension)) | (AF(Test_cnt.pow6.state=create))
+
+		CTLSPEC NAME CTL391 := !((Test_cnt.obl10.state=violation) & (!(AF(Test_cnt.pow1.state=sTermination))))
+
+		CTLSPEC NAME CTL392 := AG((Test_cnt.obl3.state=violation) & (!((Test_cnt.obl7.state=create) & (Test_cnt.obl10.state=discharge))))
+
+		CTLSPEC NAME CTL393 := (Test_cnt.obl10.state=inEffect) & (EF((Test_cnt.pow3.state=create) & (AG(Test_cnt.obl2.state=fulfillment))))
+
+		CTLSPEC NAME CTL394 := EF(!((Test_cnt.obl6.state=suspension) | ((Test_cnt.obl9.state=suspension) & (Test_cnt.pow3.state=inEffect))))
+
+		CTLSPEC NAME CTL395 := EF((EG(Test_cnt.obl6.state=violation)) & (AF(Test_cnt.pow6.state=sTermination)))
+
+		CTLSPEC NAME CTL396 := (Test_cnt.obl3.state=suspension) | (Test_cnt.obl12.state=inEffect) | ((Test_cnt.obl1.state=inEffect) & (Test_cnt.obl5.state=violation))
+
+		CTLSPEC NAME CTL397 := (EF(Test_cnt.obl6.state=discharge)) & (AG((Test_cnt.obl8.state=create) & (Test_cnt.pow7.state=sTermination)))
+
+		CTLSPEC NAME CTL398 := (Test_cnt.obl0.state=inEffect) & (!(Test_cnt.obl8.state=suspension)) & (!(Test_cnt.obl10.state=unsTermination))
+
+		CTLSPEC NAME CTL399 := AG(EF(!((Test_cnt.obl5.state=unsTermination) | (EF(Test_cnt.obl6.state=unsTermination)))))
+
+		CTLSPEC NAME CTL400 := (AF(Test_cnt.obl4.state=create)) & ((Test_cnt.obl3.state=discharge) | (EF(Test_cnt.obl7.state=violation)))
+
+		CTLSPEC NAME CTL401 := (Test_cnt.obl10.state=inEffect) | ((!(Test_cnt.obl11.state=inEffect)) & (EF(Test_cnt.pow5.state=inEffect)))
+
+		CTLSPEC NAME CTL402 := EF((AG(Test_cnt.pow3.state=inEffect)) -> (Test_cnt.obl10.state=create))
+
+		CTLSPEC NAME CTL403 := AF((Test_cnt.pow2.state=unsTermination) & (EF((Test_cnt.obl1.state=fulfillment) -> (Test_cnt.obl9.state=unsTermination))))
+
+		CTLSPEC NAME CTL404 := ((Test_cnt.obl12.state=violation) | (Test_cnt.pow4.state=unsTermination)) & (!(EF(Test_cnt.obl8.state=inEffect)))
+
+		CTLSPEC NAME CTL405 := (Test_cnt.obl4.state=create) -> (EF((Test_cnt.pow3.state=sTermination) & (EF(Test_cnt.obl5.state=fulfillment))))
+
+		CTLSPEC NAME CTL406 := !((Test_cnt.obl5.state=inEffect) & (Test_cnt.pow6.state=sTermination) & (AF(Test_cnt.obl3.state=violation)))
+
+		CTLSPEC NAME CTL407 := EF((Test_cnt.obl12.state=unsTermination) | ((!(Test_cnt.obl11.state=suspension)) -> (Test_cnt.obl11.state=suspension)))
+
+		CTLSPEC NAME CTL408 := !(AF((Test_cnt.obl11.state=create) & ((Test_cnt.obl12.state=violation) -> (Test_cnt.obl5.state=suspension))))
+
+		CTLSPEC NAME CTL409 := EF(!(EF(!(AG(Test_cnt.pow4.state=inEffect)))))
+
+		CTLSPEC NAME CTL410 := (Test_cnt.obl12.state=inEffect) & (!(EG(AF(EG(Test_cnt.pow1.state=sTermination)))))
+
+		CTLSPEC NAME CTL411 := AF(AG(AF((Test_cnt.obl9.state=violation) & (Test_cnt.pow3.state=inEffect))))
+
+		CTLSPEC NAME CTL412 := (Test_cnt.obl12.state=suspension) & (!((Test_cnt.obl2.state=discharge) | (EF(Test_cnt.obl4.state=fulfillment))))
+
+		CTLSPEC NAME CTL413 := (!(Test_cnt.obl3.state=create)) | ((Test_cnt.pow5.state=suspension) & (EG(Test_cnt.obl1.state=violation)))
+
+		CTLSPEC NAME CTL414 := (!(Test_cnt.obl8.state=violation)) & (EF(Test_cnt.obl0.state=inEffect))
+
+		CTLSPEC NAME CTL415 := ((Test_cnt.obl8.state=suspension) | (Test_cnt.pow4.state=create)) & ((Test_cnt.pow2.state=suspension) -> (Test_cnt.obl11.state=suspension))
+
+		CTLSPEC NAME CTL416 := (!(AF(AG(Test_cnt.obl5.state=unsTermination)))) -> (AG(Test_cnt.obl7.state=suspension))
+
+		CTLSPEC NAME CTL417 := EF((EF(Test_cnt.obl1.state=discharge)) & (AF(Test_cnt.obl6.state=inEffect)))
+
+		CTLSPEC NAME CTL418 := ((Test_cnt.obl4.state=discharge) & (AF(EG(Test_cnt.pow7.state=inEffect)))) -> (Test_cnt.pow7.state=unsTermination)
+
+		CTLSPEC NAME CTL419 := EF(!((Test_cnt.pow1.state=create) -> ((Test_cnt.obl1.state=fulfillment) & (Test_cnt.obl12.state=violation))))
+
+		CTLSPEC NAME CTL420 := (!(EF(Test_cnt.obl2.state=fulfillment))) -> (EG(AF(Test_cnt.pow3.state=unsTermination)))
+
+		CTLSPEC NAME CTL421 := ((Test_cnt.pow3.state=suspension) -> (Test_cnt.pow5.state=sTermination)) & ((Test_cnt.pow6.state=sTermination) -> (Test_cnt.obl5.state=suspension))
+
+		CTLSPEC NAME CTL422 := ((Test_cnt.obl3.state=violation) & (!(Test_cnt.pow1.state=create))) -> (!(Test_cnt.obl11.state=unsTermination))
+
+		CTLSPEC NAME CTL423 := (EG((Test_cnt.obl7.state=suspension) & (Test_cnt.pow0.state=sTermination))) & (EF(Test_cnt.obl9.state=suspension))
+
+		CTLSPEC NAME CTL424 := (Test_cnt.obl8.state=create) & (Test_cnt.obl12.state=violation) & (Test_cnt.pow4.state=sTermination) & (Test_cnt.pow6.state=create)
+
+		CTLSPEC NAME CTL425 := EF(!(EF((Test_cnt.pow5.state=unsTermination) -> (Test_cnt.obl9.state=create))))
+
+		CTLSPEC NAME CTL426 := ((Test_cnt.obl2.state=discharge) & (Test_cnt.obl5.state=fulfillment)) -> (!(AF(Test_cnt.obl5.state=create)))
+
+		CTLSPEC NAME CTL427 := !((AG(Test_cnt.pow3.state=inEffect)) -> (EF(!(Test_cnt.obl3.state=discharge))))
+
+		CTLSPEC NAME CTL428 := EG(!((!(Test_cnt.obl7.state=fulfillment)) & (EF(Test_cnt.obl12.state=fulfillment))))
+
+		CTLSPEC NAME CTL429 := (AF(Test_cnt.obl3.state=suspension)) & (AG(AF(Test_cnt.pow4.state=suspension)))
+
+		CTLSPEC NAME CTL430 := (Test_cnt.obl9.state=violation) & (Test_cnt.pow4.state=sTermination) & (EG(AF(Test_cnt.obl0.state=discharge)))
+
+		CTLSPEC NAME CTL431 := ((Test_cnt.obl9.state=inEffect) & (Test_cnt.pow3.state=inEffect)) -> ((Test_cnt.obl1.state=violation) | (Test_cnt.pow4.state=unsTermination))
+
+		CTLSPEC NAME CTL432 := (!(Test_cnt.obl9.state=suspension)) | (EF(!(Test_cnt.pow1.state=unsTermination)))
+
+		CTLSPEC NAME CTL433 := (Test_cnt.pow1.state=create) & (Test_cnt.pow4.state=unsTermination) & (EF(EG(Test_cnt.obl2.state=suspension)))
+
+		CTLSPEC NAME CTL434 := AF((AF(Test_cnt.obl2.state=inEffect)) & (AF(Test_cnt.obl7.state=fulfillment)))
+
+		CTLSPEC NAME CTL435 := AF((Test_cnt.obl2.state=suspension) & (!((Test_cnt.pow1.state=unsTermination) -> (Test_cnt.obl0.state=unsTermination))))
+
+		CTLSPEC NAME CTL436 := (AF(AG(Test_cnt.obl6.state=inEffect))) & (AF(Test_cnt.obl3.state=discharge))
+
+		CTLSPEC NAME CTL437 := (!(Test_cnt.obl5.state=discharge)) -> ((Test_cnt.obl7.state=create) -> (EF(Test_cnt.pow6.state=create)))
+
+		CTLSPEC NAME CTL438 := ((Test_cnt.obl0.state=suspension) & (EG(Test_cnt.obl0.state=suspension))) | (EG(Test_cnt.obl0.state=unsTermination))
+
+		CTLSPEC NAME CTL439 := (Test_cnt.pow2.state=sTermination) -> (AF((Test_cnt.obl4.state=fulfillment) & (Test_cnt.obl9.state=discharge)))
+
+		CTLSPEC NAME CTL440 := EF(!((Test_cnt.obl0.state=create) & (Test_cnt.obl3.state=unsTermination) & (Test_cnt.pow2.state=sTermination)))
+
+		CTLSPEC NAME CTL441 := !(EF(EG(Test_cnt.obl9.state=discharge)))
+
+		CTLSPEC NAME CTL442 := !(AG((!(Test_cnt.obl2.state=violation)) & (Test_cnt.obl9.state=discharge)))
+
+		CTLSPEC NAME CTL443 := !((EF(Test_cnt.obl4.state=suspension)) | (EF(Test_cnt.obl10.state=fulfillment)))
+
+		CTLSPEC NAME CTL444 := EF(EG((AF(Test_cnt.pow1.state=sTermination)) -> (Test_cnt.pow2.state=create)))
+
+		CTLSPEC NAME CTL445 := !((Test_cnt.obl6.state=violation) & ((AF(Test_cnt.obl9.state=inEffect)) -> (Test_cnt.obl0.state=violation)))
+
+		CTLSPEC NAME CTL446 := (Test_cnt.obl8.state=discharge) & (Test_cnt.obl10.state=create) & (Test_cnt.pow2.state=unsTermination)
+
+		CTLSPEC NAME CTL447 := (EF(Test_cnt.obl12.state=fulfillment)) -> (EF(Test_cnt.obl5.state=discharge))
+
+		CTLSPEC NAME CTL448 := (!(Test_cnt.obl3.state=unsTermination)) & (EG((Test_cnt.obl6.state=inEffect) -> (Test_cnt.obl1.state=unsTermination)))
+
+		CTLSPEC NAME CTL449 := ((Test_cnt.pow2.state=create) -> (Test_cnt.obl0.state=unsTermination)) & (AG(EF(Test_cnt.obl1.state=discharge)))
+
+		CTLSPEC NAME CTL450 := !((!(Test_cnt.obl1.state=inEffect)) & (Test_cnt.obl4.state=fulfillment) & (Test_cnt.obl11.state=inEffect))
+
+		CTLSPEC NAME CTL451 := (!(Test_cnt.obl4.state=inEffect)) & (AF(Test_cnt.obl5.state=unsTermination))
+
+		CTLSPEC NAME CTL452 := (!(Test_cnt.pow1.state=inEffect)) & (AF(!(EG(Test_cnt.obl8.state=suspension))))
+
+		CTLSPEC NAME CTL453 := ((Test_cnt.obl2.state=suspension) & (Test_cnt.pow3.state=inEffect)) -> ((Test_cnt.obl4.state=suspension) -> (Test_cnt.pow3.state=inEffect))
+
+		CTLSPEC NAME CTL454 := (Test_cnt.pow7.state=create) & (EG(EF(!(Test_cnt.obl5.state=violation))))
+
+		CTLSPEC NAME CTL455 := !(((Test_cnt.pow0.state=suspension) -> (Test_cnt.pow6.state=unsTermination)) | (EF(Test_cnt.obl12.state=violation)))
+
+		CTLSPEC NAME CTL456 := ((Test_cnt.obl1.state=unsTermination) | (Test_cnt.obl9.state=create)) & (!(AF(Test_cnt.pow6.state=create)))
+
+		CTLSPEC NAME CTL457 := (Test_cnt.pow4.state=unsTermination) | (!(AF((Test_cnt.obl4.state=violation) & (Test_cnt.pow7.state=suspension))))
+
+		CTLSPEC NAME CTL458 := (Test_cnt.obl2.state=discharge) & (Test_cnt.obl6.state=inEffect) & (Test_cnt.obl12.state=create)
+
+		CTLSPEC NAME CTL459 := ((Test_cnt.obl12.state=fulfillment) & (Test_cnt.obl12.state=inEffect)) | ((Test_cnt.obl0.state=unsTermination) & (Test_cnt.obl4.state=create))
+
+		CTLSPEC NAME CTL460 := (Test_cnt.obl4.state=unsTermination) | ((Test_cnt.obl8.state=create) & (Test_cnt.obl8.state=inEffect))
+
+		CTLSPEC NAME CTL461 := (Test_cnt.pow1.state=create) & (AG(Test_cnt.obl5.state=create)) & (EG(Test_cnt.pow4.state=create))
+
+		CTLSPEC NAME CTL462 := (Test_cnt.obl5.state=fulfillment) & (Test_cnt.obl9.state=discharge) & (Test_cnt.obl10.state=fulfillment) & (Test_cnt.obl10.state=inEffect)
+
+		CTLSPEC NAME CTL463 := !(AF((Test_cnt.obl12.state=create) & (AF(Test_cnt.obl12.state=unsTermination))))
+
+		CTLSPEC NAME CTL464 := AG((EF(Test_cnt.obl6.state=create)) & (EF(Test_cnt.obl4.state=violation)))
+
+		CTLSPEC NAME CTL465 := EF((Test_cnt.obl9.state=fulfillment) & ((Test_cnt.pow3.state=unsTermination) -> (AG(Test_cnt.obl0.state=discharge))))
+
+		CTLSPEC NAME CTL466 := AF(((Test_cnt.obl1.state=inEffect) & (Test_cnt.obl3.state=unsTermination)) | (EF(Test_cnt.pow7.state=sTermination)))
+
+		CTLSPEC NAME CTL467 := ((Test_cnt.obl6.state=inEffect) & (Test_cnt.pow4.state=sTermination)) | (AG(EF(Test_cnt.pow1.state=unsTermination)))
+
+		CTLSPEC NAME CTL468 := (Test_cnt.obl4.state=violation) -> (AF(EG(Test_cnt.obl4.state=create)))
+
+		CTLSPEC NAME CTL469 := EG(((!(Test_cnt.obl11.state=violation)) & (Test_cnt.pow2.state=sTermination)) -> (Test_cnt.obl0.state=unsTermination))
+
+		CTLSPEC NAME CTL470 := (Test_cnt.obl2.state=suspension) & (Test_cnt.pow1.state=inEffect) & (AF(Test_cnt.obl2.state=violation))
+
+		CTLSPEC NAME CTL471 := (Test_cnt.obl6.state=discharge) & (AG(Test_cnt.obl5.state=fulfillment)) & (AF(Test_cnt.pow7.state=create))
+
+		CTLSPEC NAME CTL472 := (!((!(Test_cnt.pow0.state=inEffect)) -> (Test_cnt.obl2.state=discharge))) -> (Test_cnt.pow6.state=suspension)
+
+		CTLSPEC NAME CTL473 := AF(AG((Test_cnt.pow5.state=inEffect) & (EF(Test_cnt.pow7.state=sTermination))))
+
+		CTLSPEC NAME CTL474 := ((Test_cnt.obl1.state=suspension) | (AF(Test_cnt.pow7.state=unsTermination))) -> (AG(Test_cnt.obl4.state=unsTermination))
+
+		CTLSPEC NAME CTL475 := (EF(AG(EF(Test_cnt.obl3.state=suspension)))) & (AG(Test_cnt.obl8.state=fulfillment))
+
+		CTLSPEC NAME CTL476 := (EG(Test_cnt.obl3.state=discharge)) | (EF((Test_cnt.obl5.state=unsTermination) & (Test_cnt.obl6.state=violation)))
+
+		CTLSPEC NAME CTL477 := (Test_cnt.obl5.state=violation) & ((EF(!(Test_cnt.obl2.state=violation))) -> (Test_cnt.obl11.state=discharge))
+
+		CTLSPEC NAME CTL478 := (Test_cnt.obl0.state=discharge) & (Test_cnt.obl5.state=create) & (Test_cnt.obl6.state=create) & (Test_cnt.obl9.state=create)
+
+		CTLSPEC NAME CTL479 := AG(!(AG((Test_cnt.obl11.state=fulfillment) -> (AG(Test_cnt.pow4.state=sTermination)))))
+
+		CTLSPEC NAME CTL480 := (Test_cnt.pow6.state=suspension) & (Test_cnt.pow7.state=inEffect) & (EF(!(Test_cnt.obl7.state=unsTermination)))
+
+		CTLSPEC NAME CTL481 := (Test_cnt.obl0.state=discharge) | (EF((Test_cnt.obl4.state=unsTermination) & (EF(Test_cnt.obl3.state=suspension))))
+
+		CTLSPEC NAME CTL482 := ((Test_cnt.obl1.state=create) | ((Test_cnt.obl1.state=create) & (Test_cnt.obl5.state=violation))) -> (Test_cnt.obl7.state=fulfillment)
+
+		CTLSPEC NAME CTL483 := (Test_cnt.obl2.state=unsTermination) -> ((!(Test_cnt.pow6.state=inEffect)) | (EF(Test_cnt.obl5.state=discharge)))
+
+		CTLSPEC NAME CTL484 := (EF(Test_cnt.pow1.state=sTermination)) & (AF(Test_cnt.obl9.state=create))
+
+		CTLSPEC NAME CTL485 := (!(Test_cnt.obl11.state=fulfillment)) -> ((Test_cnt.obl8.state=unsTermination) & (EF(Test_cnt.obl5.state=unsTermination)))
+
+		CTLSPEC NAME CTL486 := !((Test_cnt.obl2.state=discharge) & (Test_cnt.obl6.state=fulfillment) & (EF(Test_cnt.obl3.state=inEffect)))
+
+		CTLSPEC NAME CTL487 := (Test_cnt.pow7.state=inEffect) | ((EG(EF(Test_cnt.obl6.state=create))) -> (Test_cnt.pow6.state=create))
+
+		CTLSPEC NAME CTL488 := !((!(Test_cnt.obl2.state=create)) & (!(EF(Test_cnt.obl4.state=create))))
+
+		CTLSPEC NAME CTL489 := AF((Test_cnt.obl10.state=unsTermination) & (EF(Test_cnt.obl11.state=create)))
+
+		CTLSPEC NAME CTL490 := (Test_cnt.obl1.state=create) | (!(EF(Test_cnt.obl8.state=create)))
+
+		CTLSPEC NAME CTL491 := !(((Test_cnt.obl12.state=fulfillment) & (AF(Test_cnt.pow7.state=suspension))) -> (Test_cnt.obl10.state=fulfillment))
+
+		CTLSPEC NAME CTL492 := AG(AF(AG((Test_cnt.obl10.state=discharge) | (EG(Test_cnt.pow2.state=suspension)))))
+
+		CTLSPEC NAME CTL493 := EF((Test_cnt.obl12.state=fulfillment) & (Test_cnt.pow2.state=inEffect))
+
+		CTLSPEC NAME CTL494 := !(EF((Test_cnt.obl0.state=violation) & (EF(Test_cnt.pow1.state=suspension))))
+
+		CTLSPEC NAME CTL495 := AF(!((Test_cnt.obl5.state=suspension) -> ((Test_cnt.obl2.state=violation) & (Test_cnt.obl12.state=create))))
+
+		CTLSPEC NAME CTL496 := (!(Test_cnt.pow7.state=sTermination)) & (AF((Test_cnt.obl6.state=discharge) -> (Test_cnt.pow4.state=sTermination)))
+
+		CTLSPEC NAME CTL497 := AG(!((Test_cnt.obl4.state=suspension) -> (AG(Test_cnt.obl4.state=suspension))))
+
+		CTLSPEC NAME CTL498 := (Test_cnt.obl12.state=fulfillment) & (EF(Test_cnt.obl12.state=suspension)) & (EF(Test_cnt.obl10.state=discharge))
+
+		CTLSPEC NAME CTL499 := (Test_cnt.pow5.state=unsTermination) | (AF(Test_cnt.obl8.state=discharge))
+
+		CTLSPEC NAME CTL500 := (Test_cnt.obl4.state=inEffect) & ((Test_cnt.obl5.state=unsTermination) | (!(AF(Test_cnt.pow3.state=suspension))))
+
+		CTLSPEC NAME CTL501 := (!(EF(Test_cnt.obl2.state=unsTermination))) -> (AF(Test_cnt.pow0.state=inEffect))
+
+		CTLSPEC NAME CTL502 := AG((Test_cnt.obl2.state=fulfillment) | ((Test_cnt.pow1.state=inEffect) & (AF(Test_cnt.obl10.state=violation))))
+
+		CTLSPEC NAME CTL503 := (Test_cnt.pow0.state=sTermination) & (AG(Test_cnt.obl10.state=fulfillment)) & (AF(Test_cnt.obl0.state=fulfillment))
+
+		CTLSPEC NAME CTL504 := EG(AF((!(Test_cnt.obl3.state=violation)) & (AF(Test_cnt.obl5.state=suspension))))
+
+		CTLSPEC NAME CTL505 := !((Test_cnt.pow2.state=unsTermination) & (AG((Test_cnt.obl1.state=suspension) & (Test_cnt.obl4.state=violation))))
+
+		CTLSPEC NAME CTL506 := (AG(!(Test_cnt.pow3.state=inEffect))) -> ((Test_cnt.obl0.state=fulfillment) -> (Test_cnt.obl11.state=discharge))
+
+		CTLSPEC NAME CTL507 := (EF(Test_cnt.pow5.state=suspension)) -> ((!(Test_cnt.obl1.state=inEffect)) & (Test_cnt.pow4.state=create))
+
+		CTLSPEC NAME CTL508 := (!(Test_cnt.obl5.state=inEffect)) & ((AF(Test_cnt.pow3.state=unsTermination)) -> (Test_cnt.pow6.state=inEffect))
+
+		CTLSPEC NAME CTL509 := (Test_cnt.obl4.state=discharge) -> ((Test_cnt.obl3.state=discharge) & (!(AF(Test_cnt.obl0.state=discharge))))
+
+		CTLSPEC NAME CTL510 := !((Test_cnt.obl12.state=create) & ((Test_cnt.pow1.state=unsTermination) -> (!(Test_cnt.obl3.state=violation))))
+
+		CTLSPEC NAME CTL511 := (Test_cnt.pow2.state=inEffect) & (EG(Test_cnt.obl7.state=fulfillment)) & (AF(Test_cnt.obl3.state=inEffect))
+
+		CTLSPEC NAME CTL512 := (!((Test_cnt.obl12.state=create) & (EF(Test_cnt.pow5.state=create)))) -> (Test_cnt.obl8.state=suspension)
+
+		CTLSPEC NAME CTL513 := AG(((Test_cnt.obl7.state=create) | (Test_cnt.pow2.state=suspension)) & (AG(Test_cnt.obl0.state=fulfillment)))
+
+		CTLSPEC NAME CTL514 := (!(Test_cnt.obl10.state=create)) | (!(Test_cnt.pow7.state=suspension))
+
+		CTLSPEC NAME CTL515 := (Test_cnt.pow3.state=unsTermination) | ((Test_cnt.obl3.state=inEffect) & (EG(EF(Test_cnt.obl11.state=unsTermination))))
+
+		CTLSPEC NAME CTL516 := (Test_cnt.obl11.state=discharge) | (!(AF((Test_cnt.obl5.state=fulfillment) & (Test_cnt.obl6.state=violation))))
+
+		CTLSPEC NAME CTL517 := (Test_cnt.obl5.state=unsTermination) & (Test_cnt.obl6.state=unsTermination) & (Test_cnt.pow1.state=unsTermination) & (Test_cnt.pow5.state=unsTermination)
+
+		CTLSPEC NAME CTL518 := (EF(Test_cnt.pow4.state=suspension)) & (EG((Test_cnt.obl0.state=unsTermination) & (Test_cnt.obl3.state=discharge)))
+
+		CTLSPEC NAME CTL519 := !(AF((AF(Test_cnt.obl0.state=create)) & (EF(Test_cnt.obl0.state=violation))))
+
+		CTLSPEC NAME CTL520 := AF((Test_cnt.obl8.state=unsTermination) & (EF((Test_cnt.obl5.state=fulfillment) & (Test_cnt.obl10.state=create))))
+
+		CTLSPEC NAME CTL521 := AG(((Test_cnt.obl8.state=suspension) & (Test_cnt.obl8.state=violation)) -> (Test_cnt.pow7.state=sTermination))
+
+		CTLSPEC NAME CTL522 := AF((Test_cnt.obl3.state=suspension) | (Test_cnt.obl5.state=fulfillment) | (EG(Test_cnt.obl4.state=discharge)))
+
+		CTLSPEC NAME CTL523 := (EF(Test_cnt.obl2.state=suspension)) -> (EG(EF(!(Test_cnt.obl7.state=violation))))
+
+		CTLSPEC NAME CTL524 := AF((EG(Test_cnt.obl0.state=violation)) | (AG(Test_cnt.obl1.state=inEffect)))
+
+		CTLSPEC NAME CTL525 := !((AG(Test_cnt.pow1.state=inEffect)) | (AF(EG(Test_cnt.pow5.state=sTermination))))
+
+		CTLSPEC NAME CTL526 := EF(AG((!(Test_cnt.obl2.state=unsTermination)) -> (!(Test_cnt.pow2.state=suspension))))
+
+		CTLSPEC NAME CTL527 := EG(EF((!(Test_cnt.obl0.state=inEffect)) | (Test_cnt.obl12.state=violation)))
+
+		CTLSPEC NAME CTL528 := !(((Test_cnt.pow2.state=suspension) & (Test_cnt.pow5.state=inEffect)) -> (EF(Test_cnt.pow5.state=suspension)))
+
+		CTLSPEC NAME CTL529 := (Test_cnt.obl10.state=inEffect) & (((Test_cnt.obl6.state=fulfillment) -> (Test_cnt.obl12.state=violation)) -> (Test_cnt.pow7.state=inEffect))
+
+		CTLSPEC NAME CTL530 := !(EF((Test_cnt.obl10.state=fulfillment) & (!(AG(Test_cnt.obl2.state=inEffect)))))
+
+		CTLSPEC NAME CTL531 := AG(EF((Test_cnt.obl5.state=unsTermination) & (!(AG(Test_cnt.obl1.state=unsTermination)))))
+
+		CTLSPEC NAME CTL532 := (Test_cnt.obl6.state=inEffect) -> (EF((Test_cnt.obl0.state=discharge) | (Test_cnt.obl12.state=suspension)))
+
+		CTLSPEC NAME CTL533 := EF((Test_cnt.obl10.state=violation) & (Test_cnt.pow6.state=unsTermination) & (EG(Test_cnt.pow0.state=unsTermination)))
+
+		CTLSPEC NAME CTL534 := (AG(Test_cnt.pow3.state=unsTermination)) & (AG((Test_cnt.obl8.state=inEffect) & (Test_cnt.pow5.state=suspension)))
+
+		CTLSPEC NAME CTL535 := (Test_cnt.obl7.state=suspension) & (!(Test_cnt.obl8.state=inEffect)) & (EG(Test_cnt.pow4.state=create))
+
+		CTLSPEC NAME CTL536 := (Test_cnt.pow4.state=suspension) & (EF(Test_cnt.obl3.state=suspension)) & (EF(Test_cnt.pow2.state=suspension))
+
+		CTLSPEC NAME CTL537 := (Test_cnt.obl0.state=unsTermination) & (EG(!(EF(!(Test_cnt.obl4.state=suspension)))))
+
+		CTLSPEC NAME CTL538 := (AF(Test_cnt.pow3.state=suspension)) & ((EG(Test_cnt.obl1.state=unsTermination)) -> (Test_cnt.obl1.state=violation))
+
+		CTLSPEC NAME CTL539 := (Test_cnt.obl5.state=discharge) & (EF(Test_cnt.obl5.state=unsTermination)) & (AF(Test_cnt.obl6.state=suspension))
+
+		CTLSPEC NAME CTL540 := (Test_cnt.pow0.state=inEffect) & (EF(Test_cnt.obl4.state=create)) & (EF(Test_cnt.pow1.state=create))
+
+		CTLSPEC NAME CTL541 := (Test_cnt.obl0.state=inEffect) & (Test_cnt.obl12.state=violation) & (EF(!(Test_cnt.pow1.state=suspension)))
+
+		CTLSPEC NAME CTL542 := AF((AG(Test_cnt.obl11.state=fulfillment)) -> (EG(AF(Test_cnt.obl6.state=unsTermination))))
+
+		CTLSPEC NAME CTL543 := EF(EG((Test_cnt.obl3.state=violation) & (Test_cnt.obl9.state=fulfillment) & (Test_cnt.obl12.state=discharge)))
+
+		CTLSPEC NAME CTL544 := EF(!(EF((AG(Test_cnt.pow1.state=unsTermination)) -> (Test_cnt.pow5.state=unsTermination))))
+
+		CTLSPEC NAME CTL545 := AG((Test_cnt.obl0.state=create) -> ((Test_cnt.obl3.state=fulfillment) | (EF(Test_cnt.pow6.state=create))))
+
+		CTLSPEC NAME CTL546 := AF(!((Test_cnt.pow6.state=suspension) & ((Test_cnt.obl12.state=suspension) -> (Test_cnt.obl0.state=suspension))))
+
+		CTLSPEC NAME CTL547 := (Test_cnt.obl1.state=violation) & (!(Test_cnt.obl12.state=suspension)) & (!(Test_cnt.pow0.state=unsTermination))
+
+		CTLSPEC NAME CTL548 := (Test_cnt.obl6.state=inEffect) & (EF(!((Test_cnt.pow1.state=sTermination) & (Test_cnt.pow5.state=sTermination))))
+
+		CTLSPEC NAME CTL549 := EF((EG(!(Test_cnt.pow0.state=create))) -> (EF(Test_cnt.obl9.state=suspension)))
+
+		CTLSPEC NAME CTL550 := (Test_cnt.pow5.state=inEffect) | ((Test_cnt.obl9.state=fulfillment) & (EG(AF(Test_cnt.obl6.state=unsTermination))))
+
+		CTLSPEC NAME CTL551 := ((Test_cnt.obl0.state=fulfillment) -> (Test_cnt.obl5.state=unsTermination)) & (EG(!(Test_cnt.obl0.state=fulfillment)))
+
+		CTLSPEC NAME CTL552 := AF(((Test_cnt.obl5.state=fulfillment) | (Test_cnt.pow7.state=suspension)) -> (EG(Test_cnt.pow1.state=create)))
+
+		CTLSPEC NAME CTL553 := (AF(Test_cnt.pow6.state=inEffect)) & (AG(EF(Test_cnt.pow1.state=create)))
+
+		CTLSPEC NAME CTL554 := AF((Test_cnt.pow6.state=create) & (Test_cnt.pow6.state=unsTermination) & (EF(Test_cnt.obl8.state=violation)))
+
+		CTLSPEC NAME CTL555 := (Test_cnt.obl9.state=inEffect) & (EF((Test_cnt.obl12.state=suspension) & (Test_cnt.pow5.state=suspension)))
+
+		CTLSPEC NAME CTL556 := (!(Test_cnt.pow0.state=sTermination)) & (Test_cnt.pow2.state=sTermination) & (AF(Test_cnt.obl5.state=fulfillment))
+
+		CTLSPEC NAME CTL557 := EG(AF(AG(EF((Test_cnt.obl10.state=suspension) & (Test_cnt.pow6.state=inEffect)))))
+
+		CTLSPEC NAME CTL558 := (Test_cnt.obl9.state=violation) & (Test_cnt.pow1.state=inEffect) & (!(AF(Test_cnt.obl1.state=create)))
+
+		CTLSPEC NAME CTL559 := EF((Test_cnt.pow6.state=suspension) & (AG(!(Test_cnt.pow3.state=suspension))))
+
+		CTLSPEC NAME CTL560 := AF((Test_cnt.pow7.state=sTermination) | (AG(AF(EG(Test_cnt.pow4.state=suspension)))))
+
+		CTLSPEC NAME CTL561 := AF((AF(Test_cnt.obl0.state=inEffect)) -> (Test_cnt.pow3.state=unsTermination))
+
+		CTLSPEC NAME CTL562 := AG((Test_cnt.pow4.state=sTermination) & (Test_cnt.pow7.state=suspension) & (EF(Test_cnt.obl5.state=suspension)))
+
+		CTLSPEC NAME CTL563 := EF((Test_cnt.obl4.state=suspension) & (Test_cnt.obl7.state=discharge) & (!(Test_cnt.pow7.state=create)))
+
+		CTLSPEC NAME CTL564 := ((Test_cnt.obl12.state=unsTermination) -> (!(Test_cnt.obl2.state=fulfillment))) & (EG(Test_cnt.obl3.state=fulfillment))
+
+		CTLSPEC NAME CTL565 := EG((!(AG(Test_cnt.obl0.state=discharge))) -> (EF(Test_cnt.obl12.state=inEffect)))
+
+		CTLSPEC NAME CTL566 := AF(!(EF(Test_cnt.obl4.state=unsTermination)))
+
+		CTLSPEC NAME CTL567 := (!(Test_cnt.obl2.state=suspension)) & (Test_cnt.pow2.state=create) & (EF(Test_cnt.obl11.state=inEffect))
+
+		CTLSPEC NAME CTL568 := EG((AF(Test_cnt.obl6.state=violation)) & (AG(!(Test_cnt.pow3.state=inEffect))))
+
+		CTLSPEC NAME CTL569 := (Test_cnt.obl4.state=violation) & ((Test_cnt.pow0.state=unsTermination) -> ((Test_cnt.obl9.state=inEffect) & (Test_cnt.obl10.state=discharge)))
+
+		CTLSPEC NAME CTL570 := ((Test_cnt.obl12.state=unsTermination) & ((Test_cnt.obl10.state=violation) | (Test_cnt.pow4.state=unsTermination))) -> (Test_cnt.obl3.state=fulfillment)
+
+		CTLSPEC NAME CTL571 := EG(!((Test_cnt.obl6.state=violation) & (Test_cnt.obl7.state=discharge) & (Test_cnt.pow4.state=inEffect)))
+
+		CTLSPEC NAME CTL572 := (AF(Test_cnt.obl11.state=inEffect)) & (AF((Test_cnt.obl0.state=suspension) & (Test_cnt.obl5.state=suspension)))
+
+		CTLSPEC NAME CTL573 := !((Test_cnt.obl4.state=create) & (!((Test_cnt.obl2.state=unsTermination) & (Test_cnt.obl11.state=suspension))))
+
+		CTLSPEC NAME CTL574 := (Test_cnt.pow3.state=suspension) & (EF((Test_cnt.obl4.state=violation) & (EF(Test_cnt.obl7.state=fulfillment))))
+
+		CTLSPEC NAME CTL575 := (Test_cnt.pow1.state=sTermination) & (EF((Test_cnt.obl2.state=fulfillment) & (Test_cnt.pow4.state=create)))
+
+		CTLSPEC NAME CTL576 := EG(!((Test_cnt.pow4.state=create) & (EG(Test_cnt.obl4.state=create))))
+
+		CTLSPEC NAME CTL577 := (Test_cnt.pow3.state=unsTermination) & (!((Test_cnt.obl0.state=fulfillment) & (AG(Test_cnt.obl4.state=fulfillment))))
+
+		CTLSPEC NAME CTL578 := AF(!((!(Test_cnt.obl10.state=inEffect)) & (AG(Test_cnt.obl11.state=fulfillment))))
+
+		CTLSPEC NAME CTL579 := (Test_cnt.obl8.state=suspension) & ((Test_cnt.obl9.state=unsTermination) -> ((Test_cnt.obl3.state=unsTermination) & (Test_cnt.obl6.state=violation)))
+
+		CTLSPEC NAME CTL580 := AF((!(AF(EG(Test_cnt.obl11.state=create)))) -> (Test_cnt.obl7.state=suspension))
+
+		CTLSPEC NAME CTL581 := (!(Test_cnt.obl12.state=unsTermination)) | (EG((Test_cnt.obl0.state=discharge) | (Test_cnt.obl1.state=create)))
+
+		CTLSPEC NAME CTL582 := ((AG(Test_cnt.obl11.state=fulfillment)) & (EG(Test_cnt.pow4.state=unsTermination))) -> (Test_cnt.obl9.state=discharge)
+
+		CTLSPEC NAME CTL583 := !((Test_cnt.obl4.state=unsTermination) & (EF(EG(Test_cnt.obl2.state=unsTermination))))
+
+		CTLSPEC NAME CTL584 := EG(((Test_cnt.pow7.state=create) -> (Test_cnt.obl11.state=create)) & (EG(Test_cnt.obl2.state=fulfillment)))
+
+		CTLSPEC NAME CTL585 := EF(AG((Test_cnt.pow1.state=suspension) & (!(EG(Test_cnt.obl6.state=violation)))))
+
+		CTLSPEC NAME CTL586 := !(EG((Test_cnt.obl4.state=inEffect) -> (EF(!(Test_cnt.obl7.state=discharge)))))
+
+		CTLSPEC NAME CTL587 := !((Test_cnt.pow3.state=suspension) & ((Test_cnt.obl4.state=suspension) -> (AF(Test_cnt.obl5.state=violation))))
+
+		CTLSPEC NAME CTL588 := !(((Test_cnt.obl0.state=suspension) & (EG(Test_cnt.pow1.state=inEffect))) -> (Test_cnt.obl12.state=violation))
+
+		CTLSPEC NAME CTL589 := !(EF((!(AG(Test_cnt.pow5.state=suspension))) -> (Test_cnt.obl7.state=discharge)))
+
+		CTLSPEC NAME CTL590 := AF(!(EF(!(Test_cnt.obl2.state=unsTermination))))
+
+		CTLSPEC NAME CTL591 := EF((Test_cnt.obl2.state=inEffect) & (AF(Test_cnt.obl0.state=fulfillment)))
+
+		CTLSPEC NAME CTL592 := EF(EG(((Test_cnt.obl0.state=violation) & (Test_cnt.obl2.state=suspension)) -> (Test_cnt.obl8.state=discharge)))
+
+		CTLSPEC NAME CTL593 := (!(Test_cnt.obl12.state=fulfillment)) -> (!((Test_cnt.obl0.state=discharge) & (Test_cnt.obl3.state=fulfillment)))
+
+		CTLSPEC NAME CTL594 := EG((Test_cnt.obl4.state=fulfillment) & (Test_cnt.pow5.state=inEffect) & (AG(Test_cnt.obl3.state=violation)))
+
+		CTLSPEC NAME CTL595 := (EF(Test_cnt.obl7.state=unsTermination)) -> (AF(Test_cnt.obl0.state=fulfillment))
+
+		CTLSPEC NAME CTL596 := AG((Test_cnt.obl2.state=fulfillment) & (Test_cnt.pow3.state=suspension) & (AG(Test_cnt.obl6.state=create)))
+
+		CTLSPEC NAME CTL597 := (EG(Test_cnt.obl4.state=unsTermination)) & (!(EF(!(Test_cnt.obl12.state=discharge))))
+
+		CTLSPEC NAME CTL598 := AF(AG((Test_cnt.obl11.state=discharge) & (AF(Test_cnt.obl11.state=inEffect))))
+
+		CTLSPEC NAME CTL599 := AG(!((Test_cnt.pow3.state=sTermination) -> (AG(AF(Test_cnt.obl5.state=inEffect)))))
+
+		CTLSPEC NAME CTL600 := (Test_cnt.obl4.state=fulfillment) & ((Test_cnt.obl8.state=inEffect) -> ((Test_cnt.obl12.state=discharge) -> (Test_cnt.pow4.state=create)))
+
+		CTLSPEC NAME CTL601 := (Test_cnt.obl2.state=unsTermination) & (EG((Test_cnt.obl5.state=inEffect) & (AF(Test_cnt.obl7.state=create))))
+
+		CTLSPEC NAME CTL602 := ((Test_cnt.obl4.state=unsTermination) & (Test_cnt.obl7.state=unsTermination)) | (!(EF(Test_cnt.pow0.state=create)))
+
+		CTLSPEC NAME CTL603 := AG((AF(Test_cnt.obl0.state=violation)) & (AG(!(Test_cnt.obl8.state=discharge))))
+
+		CTLSPEC NAME CTL604 := AG(AF(EG(Test_cnt.obl8.state=suspension)))
+
+		CTLSPEC NAME CTL605 := !(EG((Test_cnt.obl3.state=fulfillment) -> (Test_cnt.obl2.state=violation)))
+
+		CTLSPEC NAME CTL606 := (Test_cnt.obl7.state=violation) & ((Test_cnt.pow4.state=inEffect) | ((Test_cnt.obl4.state=violation) & (Test_cnt.obl8.state=violation)))
+
+		CTLSPEC NAME CTL607 := AG(AF(Test_cnt.obl6.state=violation))
+
+		CTLSPEC NAME CTL608 := (Test_cnt.obl1.state=discharge) & (!(Test_cnt.pow3.state=suspension)) & (AG(Test_cnt.pow0.state=sTermination))
+
+		CTLSPEC NAME CTL609 := (Test_cnt.pow2.state=unsTermination) & (EG((Test_cnt.obl2.state=unsTermination) | (!(Test_cnt.obl5.state=unsTermination))))
+
+		CTLSPEC NAME CTL610 := AG(((Test_cnt.obl8.state=suspension) & (Test_cnt.pow6.state=unsTermination)) -> (EF(Test_cnt.obl10.state=suspension)))
+
+		CTLSPEC NAME CTL611 := (EG((Test_cnt.obl3.state=violation) & (EF(Test_cnt.obl12.state=violation)))) -> (Test_cnt.pow0.state=inEffect)
+
+		CTLSPEC NAME CTL612 := (AF((Test_cnt.pow5.state=suspension) & (Test_cnt.pow5.state=unsTermination))) -> (AF(Test_cnt.pow2.state=suspension))
+
+		CTLSPEC NAME CTL613 := (Test_cnt.obl10.state=inEffect) | (AG(Test_cnt.obl6.state=violation)) | (AF(Test_cnt.pow1.state=create))
+
+		CTLSPEC NAME CTL614 := (EG(Test_cnt.obl6.state=create)) -> ((Test_cnt.obl10.state=unsTermination) & (AG(Test_cnt.obl4.state=create)))
+
+		CTLSPEC NAME CTL615 := (!(Test_cnt.pow3.state=suspension)) & (EF(Test_cnt.pow7.state=create))
+
+		CTLSPEC NAME CTL616 := (AF(Test_cnt.obl9.state=discharge)) & ((Test_cnt.obl1.state=create) | (AF(Test_cnt.obl2.state=violation)))
+
+		CTLSPEC NAME CTL617 := !(((Test_cnt.obl11.state=suspension) & (Test_cnt.pow7.state=unsTermination)) -> (AG(Test_cnt.obl3.state=create)))
+
+		CTLSPEC NAME CTL618 := !((Test_cnt.obl9.state=create) & (AF((Test_cnt.obl1.state=violation) & (Test_cnt.obl11.state=inEffect))))
+
+		CTLSPEC NAME CTL619 := !(EF((Test_cnt.pow7.state=sTermination) -> (EF(Test_cnt.obl8.state=discharge))))
+
+		CTLSPEC NAME CTL620 := EF((EF(Test_cnt.obl10.state=violation)) | (EG(Test_cnt.obl5.state=unsTermination)))
+
+		CTLSPEC NAME CTL621 := AF((Test_cnt.obl5.state=create) & ((!(Test_cnt.obl1.state=inEffect)) -> (Test_cnt.pow4.state=unsTermination)))
+
+		CTLSPEC NAME CTL622 := (AG(Test_cnt.pow3.state=inEffect)) -> ((Test_cnt.obl4.state=unsTermination) & (EF(Test_cnt.obl10.state=inEffect)))
+
+		CTLSPEC NAME CTL623 := !((EG(Test_cnt.obl3.state=discharge)) -> ((Test_cnt.obl9.state=inEffect) | (Test_cnt.obl11.state=fulfillment)))
+
+		CTLSPEC NAME CTL624 := (Test_cnt.obl3.state=discharge) & (Test_cnt.obl4.state=inEffect) & (!(AF(Test_cnt.pow1.state=suspension)))
+
+		CTLSPEC NAME CTL625 := !((Test_cnt.pow5.state=create) & (EG((Test_cnt.obl12.state=fulfillment) & (Test_cnt.pow5.state=suspension))))
+
+		CTLSPEC NAME CTL626 := AF((Test_cnt.obl2.state=create) & ((Test_cnt.obl2.state=unsTermination) | (EF(Test_cnt.pow0.state=inEffect))))
+
+		CTLSPEC NAME CTL627 := EF((Test_cnt.obl7.state=create) | ((Test_cnt.obl7.state=suspension) -> (AF(Test_cnt.pow1.state=sTermination))))
+
+		CTLSPEC NAME CTL628 := (EG(Test_cnt.pow2.state=suspension)) & (EG((Test_cnt.pow0.state=suspension) & (Test_cnt.pow2.state=sTermination)))
+
+		CTLSPEC NAME CTL629 := AF((!(Test_cnt.obl5.state=unsTermination)) & (Test_cnt.obl8.state=violation) & (Test_cnt.obl9.state=unsTermination))
+
+		CTLSPEC NAME CTL630 := (!(Test_cnt.pow7.state=sTermination)) | (EG(AF(Test_cnt.obl3.state=suspension)))
+
+		CTLSPEC NAME CTL631 := (!(Test_cnt.obl7.state=unsTermination)) & (EG((Test_cnt.obl6.state=create) & (Test_cnt.obl11.state=unsTermination)))
+
+		CTLSPEC NAME CTL632 := !((EG(Test_cnt.obl3.state=fulfillment)) & (AG(!(Test_cnt.pow6.state=suspension))))
+
+		CTLSPEC NAME CTL633 := (Test_cnt.pow0.state=sTermination) & ((Test_cnt.pow5.state=inEffect) | ((Test_cnt.obl6.state=fulfillment) & (Test_cnt.obl12.state=suspension)))
+
+		CTLSPEC NAME CTL634 := AG((!(Test_cnt.pow5.state=inEffect)) & (!(EF(Test_cnt.obl9.state=fulfillment))))
+
+		CTLSPEC NAME CTL635 := EG((!(Test_cnt.obl6.state=violation)) & (AF(EG(Test_cnt.obl8.state=suspension))))
+
+		CTLSPEC NAME CTL636 := (EG(Test_cnt.pow3.state=unsTermination)) | ((AF(Test_cnt.pow2.state=sTermination)) -> (Test_cnt.obl3.state=create))
+
+		CTLSPEC NAME CTL637 := (EF(Test_cnt.obl5.state=unsTermination)) -> (AG((Test_cnt.pow1.state=create) -> (Test_cnt.obl3.state=discharge)))
+
+		CTLSPEC NAME CTL638 := ((EF(Test_cnt.obl4.state=fulfillment)) -> (Test_cnt.obl5.state=suspension)) | (AG(Test_cnt.obl6.state=fulfillment))
+
+		CTLSPEC NAME CTL639 := EF((!(Test_cnt.obl6.state=unsTermination)) & (Test_cnt.obl11.state=discharge))
+
+		CTLSPEC NAME CTL640 := (!(Test_cnt.obl10.state=fulfillment)) & ((EF(Test_cnt.obl0.state=discharge)) -> (Test_cnt.pow6.state=inEffect))
+
+		CTLSPEC NAME CTL641 := EF((Test_cnt.obl10.state=fulfillment) -> ((Test_cnt.pow6.state=sTermination) & (Test_cnt.pow7.state=suspension)))
+
+		CTLSPEC NAME CTL642 := (Test_cnt.obl1.state=inEffect) & (Test_cnt.obl3.state=discharge) & (Test_cnt.obl12.state=unsTermination) & (Test_cnt.pow7.state=unsTermination)
+
+		CTLSPEC NAME CTL643 := !(((Test_cnt.obl6.state=unsTermination) -> (Test_cnt.obl5.state=inEffect)) | (EF(Test_cnt.pow1.state=create)))
+
+		CTLSPEC NAME CTL644 := (!(Test_cnt.pow6.state=unsTermination)) | (EG(EF(Test_cnt.obl7.state=unsTermination)))
+
+		CTLSPEC NAME CTL645 := (Test_cnt.obl0.state=unsTermination) | ((EF(Test_cnt.obl12.state=suspension)) & (EF(Test_cnt.obl5.state=fulfillment)))
+
+		CTLSPEC NAME CTL646 := ((!(Test_cnt.obl2.state=violation)) -> (Test_cnt.obl3.state=discharge)) & (AF(Test_cnt.pow5.state=inEffect))
+
+		CTLSPEC NAME CTL647 := !(EG(EF(EG(Test_cnt.obl10.state=create))))
+
+		CTLSPEC NAME CTL648 := (Test_cnt.obl0.state=fulfillment) & (Test_cnt.obl6.state=violation) & (Test_cnt.obl7.state=inEffect) & (Test_cnt.obl12.state=discharge)
+
+		CTLSPEC NAME CTL649 := (Test_cnt.obl6.state=suspension) & (Test_cnt.obl9.state=suspension) & (AG(Test_cnt.obl12.state=fulfillment))
+
+		CTLSPEC NAME CTL650 := AF(AG((Test_cnt.pow3.state=create) | (EG(Test_cnt.obl2.state=unsTermination))))
+
+		CTLSPEC NAME CTL651 := ((Test_cnt.obl7.state=discharge) -> (Test_cnt.obl7.state=fulfillment)) & (!(EG(Test_cnt.obl4.state=violation)))
+
+		CTLSPEC NAME CTL652 := ((Test_cnt.obl0.state=unsTermination) -> (Test_cnt.obl10.state=create)) & (EF(AG(Test_cnt.obl10.state=unsTermination)))
+
+		CTLSPEC NAME CTL653 := ((Test_cnt.obl2.state=suspension) & (Test_cnt.pow7.state=inEffect)) -> ((Test_cnt.obl6.state=suspension) & (Test_cnt.pow1.state=suspension))
+
+		CTLSPEC NAME CTL654 := (Test_cnt.pow3.state=inEffect) & (AF(EG(EF(!(Test_cnt.obl1.state=inEffect)))))
+
+		CTLSPEC NAME CTL655 := EG(AF((Test_cnt.obl6.state=suspension) & (EG(!(Test_cnt.obl12.state=violation)))))
+
+		CTLSPEC NAME CTL656 := EG((AF(Test_cnt.obl11.state=create)) -> (!(Test_cnt.obl7.state=create)))
+
+		CTLSPEC NAME CTL657 := (Test_cnt.pow3.state=unsTermination) & (!((Test_cnt.obl1.state=suspension) & (AF(Test_cnt.obl2.state=inEffect))))
+
+		CTLSPEC NAME CTL658 := AG((!(Test_cnt.obl0.state=violation)) | ((Test_cnt.obl0.state=fulfillment) -> (Test_cnt.obl7.state=discharge)))
+
+		CTLSPEC NAME CTL659 := ((Test_cnt.obl2.state=fulfillment) -> (Test_cnt.obl7.state=suspension)) & (EG(!(Test_cnt.obl7.state=discharge)))
+
+		CTLSPEC NAME CTL660 := EF((!(Test_cnt.obl7.state=suspension)) | (Test_cnt.obl11.state=violation) | (Test_cnt.obl12.state=fulfillment))
+
+		CTLSPEC NAME CTL661 := ((Test_cnt.pow0.state=create) -> (Test_cnt.obl7.state=violation)) & (!(EG(Test_cnt.obl12.state=fulfillment)))
+
+		CTLSPEC NAME CTL662 := AF((Test_cnt.obl9.state=fulfillment) | ((Test_cnt.obl10.state=inEffect) -> (Test_cnt.pow3.state=inEffect)))
+
+		CTLSPEC NAME CTL663 := AF((Test_cnt.obl10.state=violation) & ((Test_cnt.obl10.state=create) | (Test_cnt.pow5.state=unsTermination)))
+
+		CTLSPEC NAME CTL664 := (Test_cnt.obl8.state=inEffect) & (EF((Test_cnt.obl4.state=inEffect) & (Test_cnt.obl6.state=discharge)))
+
+		CTLSPEC NAME CTL665 := EF((Test_cnt.obl5.state=violation) & (Test_cnt.pow2.state=suspension) & (EF(Test_cnt.pow5.state=inEffect)))
+
+		CTLSPEC NAME CTL666 := ((Test_cnt.obl11.state=discharge) & (Test_cnt.pow5.state=sTermination)) -> ((Test_cnt.obl7.state=create) | (Test_cnt.obl12.state=discharge))
+
+		CTLSPEC NAME CTL667 := (EF(Test_cnt.pow4.state=unsTermination)) | (AF(AG(Test_cnt.pow3.state=create)))
+
+		CTLSPEC NAME CTL668 := EG(!((EF(Test_cnt.obl5.state=discharge)) -> (!(Test_cnt.obl4.state=discharge))))
+
+		CTLSPEC NAME CTL669 := ((Test_cnt.obl1.state=suspension) | (Test_cnt.obl11.state=create)) & (EF(!(Test_cnt.obl2.state=inEffect)))
+
+		CTLSPEC NAME CTL670 := AG(EF((EG(Test_cnt.obl9.state=create)) | (AF(Test_cnt.pow0.state=sTermination))))
+
+		CTLSPEC NAME CTL671 := AG(AF(EG(AF((Test_cnt.obl7.state=inEffect) & (Test_cnt.pow4.state=create)))))
+
+		CTLSPEC NAME CTL672 := AG((Test_cnt.pow2.state=suspension) & (EF((Test_cnt.obl2.state=discharge) & (Test_cnt.pow5.state=create))))
+
+		CTLSPEC NAME CTL673 := !(EF((!(Test_cnt.pow2.state=create)) & (EF(Test_cnt.pow3.state=sTermination))))
+
+		CTLSPEC NAME CTL674 := ((!(Test_cnt.obl0.state=unsTermination)) -> (Test_cnt.obl1.state=suspension)) | (AF(Test_cnt.obl1.state=violation))
+
+		CTLSPEC NAME CTL675 := EG((Test_cnt.obl6.state=fulfillment) | (AG(Test_cnt.pow3.state=suspension)))
+
+		CTLSPEC NAME CTL676 := EF(AG((Test_cnt.obl3.state=fulfillment) | (AG(AF(Test_cnt.obl4.state=unsTermination)))))
+
+		CTLSPEC NAME CTL677 := EF(!(AF(AG(Test_cnt.obl6.state=violation))))
+
+		CTLSPEC NAME CTL678 := (EF(Test_cnt.pow5.state=suspension)) & (AG((Test_cnt.obl8.state=fulfillment) & (Test_cnt.pow0.state=sTermination)))
+
+		CTLSPEC NAME CTL679 := AG((AF(Test_cnt.obl1.state=suspension)) & (AG(Test_cnt.obl3.state=inEffect)))
+
+		CTLSPEC NAME CTL680 := AG((Test_cnt.pow4.state=inEffect) & (AF(Test_cnt.obl1.state=fulfillment)))
+
+		CTLSPEC NAME CTL681 := (!(Test_cnt.pow6.state=inEffect)) & (EG(Test_cnt.obl5.state=suspension))
+
+		CTLSPEC NAME CTL682 := EG(AF(EG(EF(!(Test_cnt.obl7.state=discharge)))))
+
+		CTLSPEC NAME CTL683 := (EF(Test_cnt.pow2.state=unsTermination)) -> (EF((Test_cnt.obl0.state=unsTermination) -> (Test_cnt.pow5.state=suspension)))
+
+		CTLSPEC NAME CTL684 := (EG(Test_cnt.obl3.state=create)) -> (!((Test_cnt.obl9.state=inEffect) | (Test_cnt.obl12.state=fulfillment)))
+
+		CTLSPEC NAME CTL685 := EF((AF(Test_cnt.obl3.state=inEffect)) -> ((Test_cnt.obl0.state=discharge) -> (Test_cnt.obl12.state=create)))
+
+		CTLSPEC NAME CTL686 := (!(EF(Test_cnt.obl2.state=violation))) -> (AF(Test_cnt.obl9.state=discharge))
+
+		CTLSPEC NAME CTL687 := (Test_cnt.obl9.state=suspension) & (AG(AF(!(Test_cnt.pow4.state=suspension))))
+
+		CTLSPEC NAME CTL688 := EG((AG(Test_cnt.pow1.state=sTermination)) & (!(AG(Test_cnt.obl3.state=fulfillment))))
+
+		CTLSPEC NAME CTL689 := (Test_cnt.obl9.state=inEffect) -> (((Test_cnt.obl8.state=inEffect) & (Test_cnt.pow2.state=suspension)) -> (Test_cnt.obl8.state=unsTermination))
+
+		CTLSPEC NAME CTL690 := (Test_cnt.obl10.state=unsTermination) & (AF(Test_cnt.obl8.state=create)) & (AF(Test_cnt.pow1.state=create))
+
+		CTLSPEC NAME CTL691 := EG((AF(Test_cnt.obl11.state=inEffect)) & (EF(!(Test_cnt.obl12.state=fulfillment))))
+
+		CTLSPEC NAME CTL692 := EF((AF(Test_cnt.obl1.state=suspension)) & (AG(EF(Test_cnt.obl8.state=suspension))))
+
+		CTLSPEC NAME CTL693 := (Test_cnt.obl12.state=violation) & (!(Test_cnt.pow2.state=suspension)) & (AF(Test_cnt.obl4.state=violation))
+
+		CTLSPEC NAME CTL694 := (EF(Test_cnt.obl2.state=unsTermination)) & (EF((Test_cnt.obl0.state=suspension) & (Test_cnt.obl2.state=inEffect)))
+
+		CTLSPEC NAME CTL695 := EG(!((Test_cnt.obl2.state=unsTermination) & (!(EF(Test_cnt.obl11.state=create)))))
+
+		CTLSPEC NAME CTL696 := AG((EF(!(Test_cnt.obl3.state=inEffect))) -> (Test_cnt.pow4.state=sTermination))
+
+		CTLSPEC NAME CTL697 := AF((EG(Test_cnt.obl11.state=unsTermination)) -> (Test_cnt.obl2.state=violation))
+
+		CTLSPEC NAME CTL698 := EF((!(Test_cnt.obl6.state=suspension)) & (EF(Test_cnt.pow0.state=unsTermination)))
+
+		CTLSPEC NAME CTL699 := (Test_cnt.pow7.state=suspension) -> (AF((EF(Test_cnt.obl8.state=unsTermination)) -> (Test_cnt.obl6.state=fulfillment)))
+
+		CTLSPEC NAME CTL700 := (AF(Test_cnt.obl5.state=fulfillment)) & (!(AG(!(Test_cnt.pow7.state=unsTermination))))
+
+		CTLSPEC NAME CTL701 := (Test_cnt.obl10.state=suspension) | ((Test_cnt.obl9.state=violation) & (Test_cnt.pow1.state=unsTermination) & (Test_cnt.pow7.state=unsTermination))
+
+		CTLSPEC NAME CTL702 := (Test_cnt.obl7.state=inEffect) & ((!(Test_cnt.pow3.state=create)) -> (!(Test_cnt.obl7.state=inEffect)))
+
+		CTLSPEC NAME CTL703 := (Test_cnt.obl5.state=fulfillment) & (Test_cnt.obl10.state=inEffect) & (Test_cnt.pow5.state=sTermination)
+
+		CTLSPEC NAME CTL704 := (!((Test_cnt.obl7.state=create) | (Test_cnt.pow2.state=inEffect))) & (AG(Test_cnt.pow2.state=create))
+
+		CTLSPEC NAME CTL705 := AF(AG((Test_cnt.obl12.state=suspension) | (EF(Test_cnt.obl2.state=suspension))))
+
+		CTLSPEC NAME CTL706 := !(EF(EG((Test_cnt.obl2.state=create) -> (Test_cnt.obl11.state=fulfillment))))
+
+		CTLSPEC NAME CTL707 := (AF(Test_cnt.pow7.state=unsTermination)) & (AF((Test_cnt.pow2.state=create) -> (Test_cnt.pow5.state=create)))
+
+		CTLSPEC NAME CTL708 := AF((Test_cnt.obl6.state=create) -> (EF(!(Test_cnt.obl5.state=create))))
+
+		CTLSPEC NAME CTL709 := AG((Test_cnt.obl5.state=unsTermination) -> ((Test_cnt.obl1.state=violation) | (Test_cnt.obl11.state=fulfillment)))
+
+		CTLSPEC NAME CTL710 := (Test_cnt.pow7.state=sTermination) & ((Test_cnt.obl1.state=violation) -> (Test_cnt.obl9.state=discharge))
+
+		CTLSPEC NAME CTL711 := AF((Test_cnt.obl7.state=inEffect) -> (EF(Test_cnt.obl11.state=suspension)))
+
+		CTLSPEC NAME CTL712 := (Test_cnt.obl3.state=create) & (Test_cnt.obl11.state=create) & (AG(Test_cnt.obl6.state=discharge))
+
+		CTLSPEC NAME CTL713 := (Test_cnt.obl1.state=discharge) & (Test_cnt.pow2.state=sTermination) & (Test_cnt.pow3.state=inEffect) & (Test_cnt.pow6.state=suspension)
+
+		CTLSPEC NAME CTL714 := EG(AF((!(Test_cnt.pow5.state=inEffect)) -> (!(Test_cnt.obl3.state=discharge))))
+
+		CTLSPEC NAME CTL715 := (Test_cnt.pow0.state=sTermination) & (!((EF(Test_cnt.obl3.state=inEffect)) -> (Test_cnt.obl11.state=fulfillment)))
+
+		CTLSPEC NAME CTL716 := (AG(EF(AG(!(Test_cnt.obl8.state=create))))) -> (Test_cnt.pow1.state=unsTermination)
+
+		CTLSPEC NAME CTL717 := !((Test_cnt.obl4.state=create) & (AF(Test_cnt.obl9.state=create)))
+
+		CTLSPEC NAME CTL718 := !(AF(EG(!((Test_cnt.obl1.state=inEffect) -> (Test_cnt.obl0.state=suspension)))))
+
+		CTLSPEC NAME CTL719 := (Test_cnt.pow0.state=inEffect) & (EF(Test_cnt.obl3.state=unsTermination)) & (EF(Test_cnt.obl8.state=unsTermination))
+
+		CTLSPEC NAME CTL720 := AG((AF(!(Test_cnt.obl3.state=fulfillment))) -> (Test_cnt.obl5.state=violation))
+
+		CTLSPEC NAME CTL721 := !((Test_cnt.obl7.state=inEffect) & (EF(Test_cnt.obl11.state=create)))
+
+		CTLSPEC NAME CTL722 := EG(((Test_cnt.obl5.state=violation) & (Test_cnt.pow6.state=unsTermination)) -> (!(Test_cnt.obl12.state=create)))
+
+		CTLSPEC NAME CTL723 := (Test_cnt.pow7.state=suspension) & (EF(Test_cnt.pow1.state=sTermination)) & (AF(Test_cnt.obl9.state=discharge))
+
+		CTLSPEC NAME CTL724 := AG((EG(EF(Test_cnt.pow5.state=suspension))) -> (AG(Test_cnt.obl9.state=create)))
+
+		CTLSPEC NAME CTL725 := AG((Test_cnt.obl4.state=unsTermination) & (AG(!(Test_cnt.obl4.state=discharge))))
+
+		CTLSPEC NAME CTL726 := (Test_cnt.obl6.state=inEffect) & (Test_cnt.obl8.state=unsTermination) & (Test_cnt.obl10.state=inEffect) & (Test_cnt.pow4.state=sTermination)
+
+		CTLSPEC NAME CTL727 := (!(Test_cnt.obl9.state=fulfillment)) & (!((Test_cnt.obl8.state=discharge) -> (Test_cnt.obl9.state=unsTermination)))
+
+		CTLSPEC NAME CTL728 := (AF((Test_cnt.obl11.state=fulfillment) & (Test_cnt.pow1.state=inEffect))) -> (EF(Test_cnt.obl7.state=suspension))
+
+		CTLSPEC NAME CTL729 := (Test_cnt.obl3.state=discharge) & (Test_cnt.obl7.state=create) & (Test_cnt.pow7.state=sTermination) & (Test_cnt.pow7.state=suspension)
+
+		CTLSPEC NAME CTL730 := AG(!((Test_cnt.pow6.state=inEffect) | (AG(EF(Test_cnt.obl11.state=discharge)))))
+
+		CTLSPEC NAME CTL731 := EF((Test_cnt.obl11.state=violation) & ((Test_cnt.obl0.state=violation) | (AF(Test_cnt.pow2.state=sTermination))))
+
+		CTLSPEC NAME CTL732 := !((Test_cnt.obl2.state=fulfillment) -> (EF((Test_cnt.obl0.state=unsTermination) -> (Test_cnt.obl0.state=fulfillment))))
+
+		CTLSPEC NAME CTL733 := (AG(Test_cnt.obl11.state=violation)) & (AG((Test_cnt.obl4.state=inEffect) & (Test_cnt.obl8.state=inEffect)))
+
+		CTLSPEC NAME CTL734 := EF(!((Test_cnt.obl3.state=discharge) -> (AG(Test_cnt.obl7.state=suspension))))
+
+		CTLSPEC NAME CTL735 := !((AF(Test_cnt.obl9.state=unsTermination)) & (EF(Test_cnt.pow5.state=inEffect)))
+
+		CTLSPEC NAME CTL736 := AG(!(((Test_cnt.obl0.state=violation) & (Test_cnt.obl3.state=violation)) -> (Test_cnt.obl12.state=suspension)))
+
+		CTLSPEC NAME CTL737 := AF(!(AG((Test_cnt.pow6.state=unsTermination) & (EG(Test_cnt.obl3.state=suspension)))))
+
+		CTLSPEC NAME CTL738 := AG(AF((Test_cnt.obl0.state=fulfillment) | (!(AG(Test_cnt.pow7.state=create)))))
+
+		CTLSPEC NAME CTL739 := !((Test_cnt.obl4.state=create) & (EF(!(AF(Test_cnt.obl6.state=inEffect)))))
+
+		CTLSPEC NAME CTL740 := (Test_cnt.pow2.state=create) & (((Test_cnt.obl4.state=discharge) & (Test_cnt.obl8.state=suspension)) -> (Test_cnt.pow1.state=inEffect))
+
+		CTLSPEC NAME CTL741 := AF(!(AG((EF(Test_cnt.pow7.state=unsTermination)) -> (Test_cnt.obl2.state=violation))))
+
+		CTLSPEC NAME CTL742 := AF(Test_cnt.obl4.state=unsTermination)
+
+		CTLSPEC NAME CTL743 := EG(!((Test_cnt.obl4.state=discharge) | ((Test_cnt.pow1.state=unsTermination) -> (Test_cnt.obl11.state=unsTermination))))
+
+		CTLSPEC NAME CTL744 := (Test_cnt.pow2.state=unsTermination) & (EF(Test_cnt.obl1.state=unsTermination)) & (AG(Test_cnt.pow7.state=inEffect))
+
+		CTLSPEC NAME CTL745 := EG(AF((AF(Test_cnt.obl1.state=suspension)) & (EG(Test_cnt.obl1.state=inEffect))))
+
+		CTLSPEC NAME CTL746 := (AG(Test_cnt.obl6.state=fulfillment)) | (EF(!(AF(Test_cnt.pow4.state=sTermination))))
+
+		CTLSPEC NAME CTL747 := !((Test_cnt.obl7.state=discharge) | (!((Test_cnt.obl2.state=create) -> (Test_cnt.obl7.state=unsTermination))))
+
+		CTLSPEC NAME CTL748 := EF((Test_cnt.obl1.state=violation) -> ((Test_cnt.obl6.state=discharge) -> (Test_cnt.pow7.state=suspension)))
+
+		CTLSPEC NAME CTL749 := (Test_cnt.obl3.state=create) & (Test_cnt.obl10.state=create) & (EF(!(Test_cnt.obl2.state=suspension)))
+
+		CTLSPEC NAME CTL750 := EF((Test_cnt.obl1.state=violation) & (AG(AF(Test_cnt.obl0.state=inEffect))))
+
+		CTLSPEC NAME CTL751 := ((Test_cnt.obl10.state=violation) & (Test_cnt.pow2.state=create)) -> ((Test_cnt.obl11.state=inEffect) -> (Test_cnt.obl1.state=discharge))
+
+		CTLSPEC NAME CTL752 := (Test_cnt.obl3.state=create) & (Test_cnt.obl7.state=unsTermination) & ((Test_cnt.obl8.state=suspension) -> (Test_cnt.obl5.state=unsTermination))
+
+		CTLSPEC NAME CTL753 := (!(Test_cnt.obl11.state=inEffect)) & (EF(EG(Test_cnt.obl0.state=inEffect)))
+
+		CTLSPEC NAME CTL754 := AF(!(EF(!(AF(Test_cnt.obl11.state=violation)))))
+
+		CTLSPEC NAME CTL755 := EG((Test_cnt.obl0.state=fulfillment) & (Test_cnt.obl9.state=discharge) & (AG(Test_cnt.obl2.state=suspension)))
+
+		CTLSPEC NAME CTL756 := (AF(AG(Test_cnt.obl11.state=discharge))) | (AG(EF(Test_cnt.pow6.state=unsTermination)))
+
+		CTLSPEC NAME CTL757 := (Test_cnt.obl6.state=violation) & (!((EG(Test_cnt.obl1.state=discharge)) -> (Test_cnt.pow2.state=unsTermination)))
+
+		CTLSPEC NAME CTL758 := (Test_cnt.obl8.state=fulfillment) | ((Test_cnt.obl3.state=unsTermination) & ((Test_cnt.pow2.state=sTermination) -> (Test_cnt.obl7.state=suspension)))
+
+		CTLSPEC NAME CTL759 := (AG(Test_cnt.obl12.state=create)) & (AF(Test_cnt.pow3.state=inEffect))
+
+		CTLSPEC NAME CTL760 := (EF(Test_cnt.obl1.state=violation)) & (AG(!(AG(Test_cnt.obl0.state=unsTermination))))
+
+		CTLSPEC NAME CTL761 := ((Test_cnt.obl1.state=inEffect) & (Test_cnt.obl9.state=discharge)) | (!(EF(Test_cnt.pow2.state=suspension)))
+
+		CTLSPEC NAME CTL762 := EF(AG(EF(!((Test_cnt.obl11.state=unsTermination) & (Test_cnt.pow1.state=suspension)))))
+
+		CTLSPEC NAME CTL763 := !(AF(EG(EF(Test_cnt.obl12.state=create))))
+
+		CTLSPEC NAME CTL764 := AF((Test_cnt.obl9.state=create) & (!((Test_cnt.pow1.state=unsTermination) -> (Test_cnt.obl2.state=violation))))
+
+		CTLSPEC NAME CTL765 := EF(((Test_cnt.obl1.state=fulfillment) | (Test_cnt.pow7.state=unsTermination)) & (EF(Test_cnt.obl5.state=discharge)))
+
+		CTLSPEC NAME CTL766 := !(AG(!(EG(Test_cnt.obl4.state=suspension))))
+
+		CTLSPEC NAME CTL767 := AG(EF((Test_cnt.obl0.state=discharge) | (Test_cnt.obl9.state=discharge) | (Test_cnt.obl11.state=inEffect)))
+
+		CTLSPEC NAME CTL768 := !((Test_cnt.pow6.state=suspension) | ((Test_cnt.pow0.state=create) -> (EF(Test_cnt.obl4.state=inEffect))))
+
+		CTLSPEC NAME CTL769 := ((Test_cnt.obl6.state=suspension) & (Test_cnt.pow4.state=unsTermination)) | (AF(!(Test_cnt.pow4.state=sTermination)))
+
+		CTLSPEC NAME CTL770 := (!(Test_cnt.pow6.state=create)) -> (EG((Test_cnt.obl5.state=fulfillment) | (Test_cnt.pow4.state=create)))
+
+		CTLSPEC NAME CTL771 := ((Test_cnt.obl7.state=fulfillment) & (!(Test_cnt.pow0.state=suspension))) | (AF(Test_cnt.obl3.state=inEffect))
+
+		CTLSPEC NAME CTL772 := AF((AG(Test_cnt.obl8.state=fulfillment)) -> ((Test_cnt.obl8.state=unsTermination) & (Test_cnt.obl11.state=unsTermination)))
+
+		CTLSPEC NAME CTL773 := EG(EF(!((Test_cnt.obl11.state=fulfillment) & (EF(Test_cnt.obl3.state=inEffect)))))
+
+		CTLSPEC NAME CTL774 := (Test_cnt.obl1.state=discharge) & (Test_cnt.obl5.state=fulfillment) & ((Test_cnt.obl8.state=inEffect) -> (Test_cnt.obl12.state=inEffect))
+
+		CTLSPEC NAME CTL775 := ((AF(Test_cnt.pow7.state=sTermination)) & (AF(Test_cnt.obl5.state=unsTermination))) -> (Test_cnt.obl3.state=unsTermination)
+
+		CTLSPEC NAME CTL776 := (Test_cnt.obl10.state=suspension) & ((!(EG(Test_cnt.pow6.state=inEffect))) -> (Test_cnt.pow3.state=unsTermination))
+
+		CTLSPEC NAME CTL777 := AF(!((Test_cnt.obl9.state=fulfillment) | ((Test_cnt.obl4.state=discharge) & (Test_cnt.obl10.state=suspension))))
+
+		CTLSPEC NAME CTL778 := AF(((Test_cnt.obl8.state=fulfillment) & (EG(Test_cnt.pow0.state=inEffect))) -> (Test_cnt.obl11.state=suspension))
+
+		CTLSPEC NAME CTL779 := ((Test_cnt.obl4.state=suspension) & (Test_cnt.obl5.state=fulfillment)) | (AG(AF(Test_cnt.obl0.state=violation)))
+
+		CTLSPEC NAME CTL780 := AG((Test_cnt.pow7.state=sTermination) | ((Test_cnt.obl9.state=create) & (EF(Test_cnt.obl11.state=inEffect))))
+
+		CTLSPEC NAME CTL781 := EG(!(EF(EG(Test_cnt.obl5.state=fulfillment))))
+
+		CTLSPEC NAME CTL782 := AG((Test_cnt.obl2.state=violation) & (Test_cnt.obl8.state=inEffect) & (AF(Test_cnt.obl7.state=suspension)))
+
+		CTLSPEC NAME CTL783 := AG((Test_cnt.obl3.state=inEffect) -> (AF(AG(Test_cnt.pow6.state=inEffect))))
+
+		CTLSPEC NAME CTL784 := (EG(!(Test_cnt.obl2.state=fulfillment))) -> ((Test_cnt.obl10.state=fulfillment) -> (Test_cnt.obl1.state=violation))
+
+		CTLSPEC NAME CTL785 := EG((Test_cnt.pow4.state=unsTermination) & (AG(Test_cnt.pow5.state=suspension)))
+
+		CTLSPEC NAME CTL786 := (!(Test_cnt.pow1.state=inEffect)) & (AF((Test_cnt.pow3.state=sTermination) & (Test_cnt.pow7.state=sTermination)))
+
+		CTLSPEC NAME CTL787 := (Test_cnt.obl12.state=inEffect) -> ((Test_cnt.obl4.state=fulfillment) & (Test_cnt.obl5.state=suspension))
+
+		CTLSPEC NAME CTL788 := AF((Test_cnt.obl9.state=discharge) -> ((Test_cnt.obl12.state=discharge) -> (Test_cnt.obl0.state=inEffect)))
+
+		CTLSPEC NAME CTL789 := (EG(AF(Test_cnt.pow3.state=unsTermination))) -> (Test_cnt.obl1.state=inEffect)
+
+		CTLSPEC NAME CTL790 := (Test_cnt.obl4.state=violation) & (!(EG(EF(!(Test_cnt.pow7.state=inEffect)))))
+
+		CTLSPEC NAME CTL791 := (EF((Test_cnt.obl8.state=create) & (AG(Test_cnt.obl9.state=create)))) -> (Test_cnt.obl9.state=unsTermination)
+
+		CTLSPEC NAME CTL792 := AF(((Test_cnt.obl7.state=create) | (Test_cnt.obl11.state=unsTermination)) -> (Test_cnt.pow3.state=sTermination))
+
+		CTLSPEC NAME CTL793 := ((Test_cnt.pow1.state=suspension) & (EG(Test_cnt.obl3.state=create))) -> (EG(Test_cnt.obl3.state=discharge))
+
+		CTLSPEC NAME CTL794 := EG((Test_cnt.obl9.state=unsTermination) & (AF(Test_cnt.obl2.state=create)))
+
+		CTLSPEC NAME CTL795 := (AG(Test_cnt.obl2.state=fulfillment)) & (EG((Test_cnt.obl11.state=violation) & (Test_cnt.obl12.state=inEffect)))
+
+		CTLSPEC NAME CTL796 := ((Test_cnt.pow5.state=unsTermination) & (AF(Test_cnt.obl4.state=unsTermination))) -> (Test_cnt.obl11.state=create)
+
+		CTLSPEC NAME CTL797 := (Test_cnt.obl0.state=unsTermination) & (Test_cnt.obl7.state=fulfillment) & (Test_cnt.obl7.state=inEffect) & (Test_cnt.obl9.state=discharge)
+
+		CTLSPEC NAME CTL798 := (Test_cnt.obl0.state=suspension) & (EF((Test_cnt.pow3.state=create) & (AF(Test_cnt.obl11.state=inEffect))))
+
+		CTLSPEC NAME CTL799 := AF((Test_cnt.obl3.state=unsTermination) | (AF(Test_cnt.obl7.state=discharge)))
+
+		CTLSPEC NAME CTL800 := ((EF(Test_cnt.obl8.state=suspension)) -> (EG(Test_cnt.obl7.state=inEffect))) -> (Test_cnt.obl8.state=discharge)
+
+		CTLSPEC NAME CTL801 := EF((EF(Test_cnt.pow0.state=create)) & (!(EG(Test_cnt.obl5.state=unsTermination))))
+
+		CTLSPEC NAME CTL802 := (Test_cnt.pow1.state=sTermination) -> ((!(Test_cnt.obl0.state=violation)) & (!(Test_cnt.obl9.state=fulfillment)))
+
+		CTLSPEC NAME CTL803 := (Test_cnt.obl3.state=create) & (Test_cnt.obl11.state=suspension) & (Test_cnt.pow4.state=sTermination) & (Test_cnt.pow6.state=suspension)
+
+		CTLSPEC NAME CTL804 := (Test_cnt.obl4.state=create) | (EF(!(AF(EG(Test_cnt.obl7.state=create)))))
+
+		CTLSPEC NAME CTL805 := !((!(Test_cnt.pow2.state=suspension)) -> (Test_cnt.pow5.state=sTermination))
+
+		CTLSPEC NAME CTL806 := (Test_cnt.obl9.state=inEffect) & (Test_cnt.pow2.state=create) & (EF(Test_cnt.obl5.state=discharge))
+
+		CTLSPEC NAME CTL807 := (Test_cnt.pow6.state=unsTermination) -> ((Test_cnt.obl3.state=unsTermination) & (AF(!(Test_cnt.pow2.state=sTermination))))
+
+		CTLSPEC NAME CTL808 := ((Test_cnt.obl7.state=fulfillment) & (EG(Test_cnt.obl4.state=discharge))) -> (EF(Test_cnt.obl4.state=fulfillment))
+
+		CTLSPEC NAME CTL809 := EG(AF(AG((AF(Test_cnt.pow5.state=inEffect)) -> (Test_cnt.pow4.state=sTermination))))
+
+		CTLSPEC NAME CTL810 := AG(((Test_cnt.obl2.state=inEffect) | (Test_cnt.pow7.state=create)) & (AG(Test_cnt.pow1.state=unsTermination)))
+
+		CTLSPEC NAME CTL811 := !(AF((EF(Test_cnt.obl9.state=create)) & (AF(Test_cnt.obl6.state=suspension))))
+
+		CTLSPEC NAME CTL812 := EF(EG((AF(Test_cnt.pow6.state=inEffect)) & (AF(Test_cnt.obl2.state=suspension))))
+
+		CTLSPEC NAME CTL813 := AG((Test_cnt.obl2.state=create) & (Test_cnt.obl12.state=discharge) & (!(Test_cnt.pow7.state=inEffect)))
+
+		CTLSPEC NAME CTL814 := ((Test_cnt.obl5.state=inEffect) & (AF(Test_cnt.obl1.state=create))) | (AF(Test_cnt.obl4.state=discharge))
+
+		CTLSPEC NAME CTL815 := (AG(Test_cnt.obl5.state=create)) | ((Test_cnt.obl11.state=suspension) & (EG(Test_cnt.obl10.state=unsTermination)))
+
+		CTLSPEC NAME CTL816 := AF(!(EG((Test_cnt.obl0.state=unsTermination) & (EG(Test_cnt.obl0.state=fulfillment)))))
+
+		CTLSPEC NAME CTL817 := AG(!(EG(EF(Test_cnt.pow1.state=create))))
+
+		CTLSPEC NAME CTL818 := AG((Test_cnt.obl0.state=create) -> (EF(EG(Test_cnt.pow0.state=create))))
+
+		CTLSPEC NAME CTL819 := !(AF(!((Test_cnt.obl3.state=discharge) | (EF(Test_cnt.obl1.state=unsTermination)))))
+
+		CTLSPEC NAME CTL820 := (EG(Test_cnt.pow0.state=inEffect)) | (!(EG(EF(Test_cnt.pow6.state=create))))
+
+		CTLSPEC NAME CTL821 := (Test_cnt.obl8.state=fulfillment) & (Test_cnt.pow7.state=sTermination) & ((Test_cnt.obl3.state=violation) -> (Test_cnt.pow3.state=create))
+
+		CTLSPEC NAME CTL822 := (EF(EG(Test_cnt.pow4.state=unsTermination))) & (EF(Test_cnt.obl4.state=fulfillment))
+
+		CTLSPEC NAME CTL823 := AF(!(EF((Test_cnt.obl4.state=discharge) -> (Test_cnt.pow4.state=sTermination))))
+
+		CTLSPEC NAME CTL824 := (!(Test_cnt.obl0.state=unsTermination)) -> (EF(!(AG(Test_cnt.obl5.state=suspension))))
+
+		CTLSPEC NAME CTL825 := (Test_cnt.obl6.state=unsTermination) & ((Test_cnt.obl3.state=fulfillment) -> (Test_cnt.obl5.state=suspension))
+
+		CTLSPEC NAME CTL826 := EG(AF(!((!(Test_cnt.obl1.state=fulfillment)) -> (Test_cnt.obl6.state=fulfillment))))
+
+		CTLSPEC NAME CTL827 := !((EG((Test_cnt.obl4.state=unsTermination) | (Test_cnt.pow1.state=inEffect))) -> (Test_cnt.obl0.state=create))
+
+		CTLSPEC NAME CTL828 := (Test_cnt.obl4.state=unsTermination) & (EG(!(AG(!(Test_cnt.pow7.state=inEffect)))))
+
+		CTLSPEC NAME CTL829 := (!(Test_cnt.obl6.state=suspension)) -> (EG((Test_cnt.obl8.state=create) & (Test_cnt.pow5.state=create)))
+
+		CTLSPEC NAME CTL830 := (Test_cnt.obl9.state=fulfillment) & (EG(!((Test_cnt.obl4.state=fulfillment) & (Test_cnt.pow5.state=unsTermination))))
+
+		CTLSPEC NAME CTL831 := (!(Test_cnt.obl7.state=inEffect)) & (AF(AG(Test_cnt.pow1.state=suspension)))
+
+		CTLSPEC NAME CTL832 := (Test_cnt.obl6.state=inEffect) & (AG((Test_cnt.obl1.state=discharge) & (EG(Test_cnt.obl7.state=inEffect))))
+
+		CTLSPEC NAME CTL833 := (Test_cnt.obl9.state=violation) & (EF(Test_cnt.obl5.state=create)) & (AG(Test_cnt.obl0.state=inEffect))
+
+		CTLSPEC NAME CTL834 := (AG((Test_cnt.obl3.state=unsTermination) & (AF(Test_cnt.obl12.state=suspension)))) -> (Test_cnt.obl7.state=inEffect)
+
+		CTLSPEC NAME CTL835 := (EG(Test_cnt.pow0.state=suspension)) & (!(AF(!(Test_cnt.obl0.state=create))))
+
+		CTLSPEC NAME CTL836 := (Test_cnt.obl0.state=discharge) & (!(Test_cnt.pow6.state=inEffect)) & (EF(Test_cnt.obl9.state=unsTermination))
+
+		CTLSPEC NAME CTL837 := AG((Test_cnt.obl0.state=inEffect) & (Test_cnt.obl3.state=create) & (AF(Test_cnt.obl9.state=inEffect)))
+
+		CTLSPEC NAME CTL838 := (Test_cnt.obl7.state=create) & (!(Test_cnt.pow4.state=inEffect)) & (AF(Test_cnt.pow1.state=create))
+
+		CTLSPEC NAME CTL839 := AG(!((Test_cnt.pow2.state=unsTermination) & (!(EG(Test_cnt.pow4.state=create)))))
+
+		CTLSPEC NAME CTL840 := !((Test_cnt.pow1.state=create) -> ((Test_cnt.obl0.state=suspension) & (!(Test_cnt.obl10.state=unsTermination))))
+
+		CTLSPEC NAME CTL841 := AG(EF((!(Test_cnt.obl6.state=unsTermination)) & (EF(Test_cnt.pow5.state=inEffect))))
+
+		CTLSPEC NAME CTL842 := !((Test_cnt.obl1.state=fulfillment) -> (!(Test_cnt.obl7.state=unsTermination)))
+
+		CTLSPEC NAME CTL843 := EF((!(Test_cnt.pow5.state=sTermination)) & ((Test_cnt.pow6.state=create) -> (Test_cnt.obl0.state=suspension)))
+
+		CTLSPEC NAME CTL844 := (EF((Test_cnt.obl5.state=fulfillment) -> (Test_cnt.pow5.state=unsTermination))) -> (!(Test_cnt.obl9.state=create))
+
+		CTLSPEC NAME CTL845 := !((!(Test_cnt.obl11.state=suspension)) & (Test_cnt.pow3.state=sTermination))
+
+		CTLSPEC NAME CTL846 := AG((EF(Test_cnt.pow0.state=inEffect)) -> (Test_cnt.obl5.state=inEffect))
+
+		CTLSPEC NAME CTL847 := (!(EF(Test_cnt.obl3.state=inEffect))) -> (EF(AG(Test_cnt.obl0.state=inEffect)))
+
+		CTLSPEC NAME CTL848 := EG(AF(AG(Test_cnt.obl7.state=fulfillment)))
+
+		CTLSPEC NAME CTL849 := !(EG(((Test_cnt.obl2.state=discharge) & (Test_cnt.pow1.state=suspension)) -> (Test_cnt.pow4.state=suspension)))
+
+		CTLSPEC NAME CTL850 := EF(AG(AF((Test_cnt.obl6.state=discharge) -> (Test_cnt.pow6.state=suspension))))
+
+		CTLSPEC NAME CTL851 := EF((Test_cnt.obl6.state=violation) & (Test_cnt.pow4.state=unsTermination) & (AG(Test_cnt.obl4.state=discharge)))
+
+		CTLSPEC NAME CTL852 := (!(Test_cnt.obl6.state=create)) & (Test_cnt.obl8.state=unsTermination) & (EF(Test_cnt.obl7.state=discharge))
+
+		CTLSPEC NAME CTL853 := AF((!(Test_cnt.obl11.state=unsTermination)) & (AF(!(Test_cnt.obl10.state=create))))
+
+		CTLSPEC NAME CTL854 := (Test_cnt.obl10.state=fulfillment) & (EG((Test_cnt.obl4.state=unsTermination) | (!(Test_cnt.pow0.state=inEffect))))
+
+		CTLSPEC NAME CTL855 := EG((Test_cnt.obl3.state=violation) & (Test_cnt.pow3.state=sTermination))
+
+		CTLSPEC NAME CTL856 := !((Test_cnt.obl3.state=discharge) & (AG(Test_cnt.obl10.state=inEffect)))
+
+		CTLSPEC NAME CTL857 := (!(AG(Test_cnt.obl3.state=fulfillment))) -> (!(AF(Test_cnt.obl1.state=inEffect)))
+
+		CTLSPEC NAME CTL858 := EF((!(Test_cnt.pow7.state=suspension)) & (!(EF(Test_cnt.pow6.state=sTermination))))
+
+		CTLSPEC NAME CTL859 := EF(EG((Test_cnt.obl0.state=suspension) & (Test_cnt.obl11.state=violation) & (Test_cnt.pow1.state=inEffect)))
+
+		CTLSPEC NAME CTL860 := (AG(Test_cnt.obl6.state=discharge)) | ((Test_cnt.obl0.state=discharge) & (AF(Test_cnt.obl5.state=inEffect)))
+
+		CTLSPEC NAME CTL861 := !(((Test_cnt.obl5.state=discharge) & (Test_cnt.obl10.state=suspension)) | (AG(Test_cnt.obl5.state=create)))
+
+		CTLSPEC NAME CTL862 := (AF(Test_cnt.obl1.state=inEffect)) & (EF(EG(EF(Test_cnt.obl2.state=fulfillment))))
+
+		CTLSPEC NAME CTL863 := (AF(Test_cnt.pow7.state=inEffect)) & ((Test_cnt.obl5.state=violation) -> (EF(Test_cnt.obl4.state=inEffect)))
+
+		CTLSPEC NAME CTL864 := EF(EG((EG(Test_cnt.obl3.state=discharge)) | (AF(Test_cnt.obl0.state=violation))))
+
+		CTLSPEC NAME CTL865 := (AF(Test_cnt.obl5.state=unsTermination)) & (AG(EF(Test_cnt.obl9.state=create)))
+
+		CTLSPEC NAME CTL866 := (Test_cnt.obl8.state=discharge) & (!(Test_cnt.pow7.state=inEffect)) & (AF(Test_cnt.obl11.state=violation))
+
+		CTLSPEC NAME CTL867 := (Test_cnt.obl9.state=violation) | (AF(Test_cnt.pow4.state=suspension)) | (AF(Test_cnt.pow2.state=unsTermination))
+
+		CTLSPEC NAME CTL868 := (!(Test_cnt.obl0.state=violation)) | ((Test_cnt.obl10.state=create) & (AF(Test_cnt.obl8.state=discharge)))
+
+		CTLSPEC NAME CTL869 := !(((Test_cnt.obl3.state=fulfillment) -> (Test_cnt.obl10.state=violation)) -> (EG(Test_cnt.pow0.state=inEffect)))
+
+		CTLSPEC NAME CTL870 := (Test_cnt.obl8.state=fulfillment) & (AF(Test_cnt.obl1.state=fulfillment)) & (AG(Test_cnt.pow3.state=unsTermination))
+
+		CTLSPEC NAME CTL871 := (AF(Test_cnt.pow2.state=create)) -> (Test_cnt.obl11.state=suspension)
+
+		CTLSPEC NAME CTL872 := (AG(!(AG(Test_cnt.pow7.state=suspension)))) -> (!(Test_cnt.pow4.state=unsTermination))
+
+		CTLSPEC NAME CTL873 := (EG(Test_cnt.obl5.state=fulfillment)) & (AG(AF(!(Test_cnt.pow7.state=inEffect))))
+
+		CTLSPEC NAME CTL874 := (Test_cnt.obl0.state=discharge) -> (EG(!(Test_cnt.obl3.state=fulfillment)))
+
+		CTLSPEC NAME CTL875 := !((AF(Test_cnt.obl1.state=suspension)) -> ((Test_cnt.obl6.state=inEffect) & (Test_cnt.obl10.state=fulfillment)))
+
+		CTLSPEC NAME CTL876 := (Test_cnt.obl5.state=inEffect) & (Test_cnt.pow1.state=create) & (AF(Test_cnt.pow4.state=sTermination))
+
+		CTLSPEC NAME CTL877 := (Test_cnt.obl2.state=discharge) & (AF((AG(Test_cnt.pow3.state=suspension)) -> (Test_cnt.obl9.state=suspension)))
+
+		CTLSPEC NAME CTL878 := (Test_cnt.obl4.state=create) & (!(Test_cnt.obl7.state=inEffect)) & (AG(Test_cnt.pow3.state=create))
+
+		CTLSPEC NAME CTL879 := (Test_cnt.obl11.state=fulfillment) -> (EG(Test_cnt.obl1.state=create))
+
+		CTLSPEC NAME CTL880 := EF(((!(Test_cnt.pow1.state=create)) & (Test_cnt.pow2.state=inEffect)) -> (Test_cnt.obl7.state=create))
+
+		CTLSPEC NAME CTL881 := AG(((Test_cnt.pow2.state=suspension) & (EF(Test_cnt.pow0.state=unsTermination))) -> (Test_cnt.obl12.state=violation))
+
+		CTLSPEC NAME CTL882 := AF(((Test_cnt.obl10.state=discharge) & (Test_cnt.pow2.state=create)) -> (Test_cnt.obl5.state=fulfillment))
+
+		CTLSPEC NAME CTL883 := (Test_cnt.obl4.state=violation) & ((AG(Test_cnt.pow1.state=create)) -> (!(Test_cnt.obl3.state=fulfillment)))
+
+		CTLSPEC NAME CTL884 := (Test_cnt.pow5.state=suspension) | (AG(Test_cnt.obl1.state=discharge))
+
+		CTLSPEC NAME CTL885 := AF(Test_cnt.obl9.state=unsTermination)
+
+		CTLSPEC NAME CTL886 := (!(Test_cnt.obl11.state=fulfillment)) & (Test_cnt.pow6.state=unsTermination) & (AF(Test_cnt.obl9.state=suspension))
+
+		CTLSPEC NAME CTL887 := (Test_cnt.obl10.state=create) & (Test_cnt.pow2.state=sTermination) & ((Test_cnt.obl11.state=create) | (Test_cnt.obl12.state=violation))
+
+		CTLSPEC NAME CTL888 := (Test_cnt.obl3.state=discharge) & (AF(Test_cnt.obl6.state=unsTermination)) & (AF(Test_cnt.obl6.state=inEffect))
+
+		CTLSPEC NAME CTL889 := AG(EF((Test_cnt.obl8.state=unsTermination) & (Test_cnt.pow4.state=suspension) & (Test_cnt.pow7.state=sTermination)))
+
+		CTLSPEC NAME CTL890 := AF((Test_cnt.obl4.state=suspension) & (Test_cnt.obl12.state=create) & (AG(Test_cnt.pow3.state=create)))
+
+		CTLSPEC NAME CTL891 := AG(AF(AG((Test_cnt.obl3.state=create) & (Test_cnt.pow0.state=unsTermination))))
+
+		CTLSPEC NAME CTL892 := ((Test_cnt.pow1.state=unsTermination) -> (!(Test_cnt.obl2.state=fulfillment))) -> (EF(Test_cnt.obl8.state=violation))
+
+		CTLSPEC NAME CTL893 := AG((Test_cnt.obl8.state=fulfillment) & ((Test_cnt.obl1.state=violation) -> (Test_cnt.obl5.state=fulfillment)))
+
+		CTLSPEC NAME CTL894 := AG(EF((EF(Test_cnt.obl7.state=unsTermination)) -> (Test_cnt.obl9.state=violation)))
+
+		CTLSPEC NAME CTL895 := EG((!(Test_cnt.pow1.state=inEffect)) -> ((Test_cnt.obl9.state=create) | (Test_cnt.obl10.state=create)))
+
+		CTLSPEC NAME CTL896 := (AF(Test_cnt.obl3.state=discharge)) & (EG(AF(Test_cnt.obl7.state=unsTermination)))
+
+		CTLSPEC NAME CTL897 := (!(Test_cnt.obl5.state=create)) & (!(AF(!(Test_cnt.obl10.state=suspension))))
+
+		CTLSPEC NAME CTL898 := AF((Test_cnt.obl9.state=create) -> (EG(Test_cnt.obl1.state=violation)))
+
+		CTLSPEC NAME CTL899 := AF((EG(Test_cnt.pow6.state=suspension)) -> ((Test_cnt.pow0.state=inEffect) & (Test_cnt.pow5.state=inEffect)))
+
+		CTLSPEC NAME CTL900 := EG(((Test_cnt.obl0.state=inEffect) & (Test_cnt.pow7.state=inEffect)) | (EF(Test_cnt.pow3.state=unsTermination)))
+
+		CTLSPEC NAME CTL901 := (Test_cnt.obl12.state=discharge) & (AF((Test_cnt.obl0.state=inEffect) | (Test_cnt.obl0.state=unsTermination)))
+
+		CTLSPEC NAME CTL902 := !(EF(!(EF((Test_cnt.obl10.state=fulfillment) & (Test_cnt.pow0.state=sTermination)))))
+
+		CTLSPEC NAME CTL903 := AF((!(Test_cnt.obl2.state=unsTermination)) & (AF(Test_cnt.obl2.state=inEffect)))
+
+		CTLSPEC NAME CTL904 := (EF(Test_cnt.pow6.state=inEffect)) & (AG((Test_cnt.obl2.state=fulfillment) & (Test_cnt.obl11.state=fulfillment)))
+
+		CTLSPEC NAME CTL905 := (Test_cnt.obl1.state=violation) | (AF(EG(EF(Test_cnt.pow3.state=unsTermination))))
+
+		CTLSPEC NAME CTL906 := AF(AG((Test_cnt.obl10.state=inEffect) & (Test_cnt.obl12.state=discharge)))
+
+		CTLSPEC NAME CTL907 := EG(AF((Test_cnt.obl9.state=create) & (Test_cnt.pow1.state=create)))
+
+		CTLSPEC NAME CTL908 := (Test_cnt.obl0.state=discharge) & (EF((Test_cnt.pow6.state=inEffect) & (AG(Test_cnt.obl7.state=discharge))))
+
+		CTLSPEC NAME CTL909 := AG(AF((AG(Test_cnt.obl9.state=fulfillment)) -> (!(Test_cnt.obl9.state=violation))))
+
+		CTLSPEC NAME CTL910 := AF((Test_cnt.obl12.state=inEffect) & (AF((Test_cnt.obl0.state=inEffect) & (Test_cnt.obl10.state=violation))))
+
+		CTLSPEC NAME CTL911 := !(AG((!(AF(Test_cnt.obl3.state=create))) -> (Test_cnt.obl9.state=unsTermination)))
+
+		CTLSPEC NAME CTL912 := (Test_cnt.obl9.state=create) & (!(Test_cnt.pow0.state=unsTermination)) & (AG(Test_cnt.pow5.state=create))
+
+		CTLSPEC NAME CTL913 := (!(Test_cnt.obl5.state=violation)) -> ((Test_cnt.obl0.state=unsTermination) & (AF(Test_cnt.obl8.state=inEffect)))
+
+		CTLSPEC NAME CTL914 := !(AF(EG(!((Test_cnt.pow4.state=sTermination) & (Test_cnt.pow6.state=unsTermination)))))
+
+		CTLSPEC NAME CTL915 := ((Test_cnt.pow7.state=suspension) -> (!(Test_cnt.pow2.state=unsTermination))) & (EG(Test_cnt.pow2.state=inEffect))
+
+		CTLSPEC NAME CTL916 := (EG(EF(Test_cnt.obl5.state=create))) & (EF(EG(Test_cnt.obl2.state=fulfillment)))
+
+		CTLSPEC NAME CTL917 := ((Test_cnt.obl5.state=unsTermination) -> ((Test_cnt.obl3.state=discharge) & (Test_cnt.obl6.state=violation))) -> (Test_cnt.obl9.state=suspension)
+
+		CTLSPEC NAME CTL918 := (Test_cnt.pow7.state=inEffect) | (AF(!(Test_cnt.obl6.state=fulfillment)))
+
+		CTLSPEC NAME CTL919 := EF((EG(Test_cnt.obl2.state=suspension)) | (!(EF(Test_cnt.pow7.state=create))))
+
+		CTLSPEC NAME CTL920 := EF((!(Test_cnt.obl4.state=create)) & (EG(AF(Test_cnt.pow4.state=suspension))))
+
+		CTLSPEC NAME CTL921 := AF(((AG(Test_cnt.pow7.state=suspension)) -> (Test_cnt.obl12.state=fulfillment)) -> (Test_cnt.obl4.state=suspension))
+
+		CTLSPEC NAME CTL922 := (Test_cnt.obl11.state=inEffect) & (!(EF((Test_cnt.obl5.state=create) & (Test_cnt.obl7.state=unsTermination))))
+
+		CTLSPEC NAME CTL923 := EG((Test_cnt.pow7.state=unsTermination) | (AF(Test_cnt.obl4.state=create)))
+
+		CTLSPEC NAME CTL924 := EF((AF(Test_cnt.obl5.state=inEffect)) & (EF(Test_cnt.obl0.state=unsTermination)))
+
+		CTLSPEC NAME CTL925 := EG((Test_cnt.obl2.state=create) & (Test_cnt.obl8.state=fulfillment) & (AG(Test_cnt.obl0.state=create)))
+
+		CTLSPEC NAME CTL926 := (Test_cnt.obl3.state=suspension) & ((Test_cnt.obl1.state=create) -> (EG(!(Test_cnt.obl4.state=inEffect))))
+
+		CTLSPEC NAME CTL927 := EG((AF(Test_cnt.obl1.state=unsTermination)) -> ((Test_cnt.obl8.state=unsTermination) & (Test_cnt.pow6.state=sTermination)))
+
+		CTLSPEC NAME CTL928 := (Test_cnt.obl0.state=violation) & (AF(Test_cnt.obl9.state=create)) & (AF(Test_cnt.pow3.state=suspension))
+
+		CTLSPEC NAME CTL929 := (Test_cnt.obl4.state=violation) & ((Test_cnt.obl11.state=fulfillment) -> (Test_cnt.obl12.state=suspension))
+
+		CTLSPEC NAME CTL930 := !((Test_cnt.obl5.state=violation) & (Test_cnt.obl7.state=unsTermination) & (EF(Test_cnt.obl11.state=unsTermination)))
+
+		CTLSPEC NAME CTL931 := AF((Test_cnt.obl6.state=suspension) & (Test_cnt.pow0.state=sTermination))
+
+		CTLSPEC NAME CTL932 := AF((Test_cnt.obl1.state=fulfillment) | ((Test_cnt.obl1.state=discharge) & (AF(Test_cnt.obl2.state=inEffect))))
+
+		CTLSPEC NAME CTL933 := AF((!(Test_cnt.obl9.state=violation)) -> ((Test_cnt.pow0.state=unsTermination) | (Test_cnt.pow3.state=suspension)))
+
+		CTLSPEC NAME CTL934 := AG((EF(Test_cnt.obl2.state=violation)) -> ((Test_cnt.obl6.state=violation) | (Test_cnt.pow2.state=create)))
+
+		CTLSPEC NAME CTL935 := (!(Test_cnt.pow3.state=suspension)) & (AF((Test_cnt.obl11.state=inEffect) & (Test_cnt.pow1.state=sTermination)))
+
+		CTLSPEC NAME CTL936 := AF(EG(AF((Test_cnt.pow2.state=sTermination) -> (EG(Test_cnt.pow7.state=unsTermination)))))
+
+		CTLSPEC NAME CTL937 := EF((Test_cnt.obl1.state=violation) & (AF(!(Test_cnt.pow7.state=create))))
+
+		CTLSPEC NAME CTL938 := ((Test_cnt.obl6.state=suspension) & (AG(Test_cnt.pow6.state=create))) -> (EF(Test_cnt.obl6.state=create))
+
+		CTLSPEC NAME CTL939 := EG((Test_cnt.pow0.state=sTermination) & (Test_cnt.pow2.state=sTermination) & (EF(Test_cnt.obl11.state=discharge)))
+
+		CTLSPEC NAME CTL940 := AF((Test_cnt.obl3.state=unsTermination) & (Test_cnt.pow6.state=inEffect) & (AG(Test_cnt.obl5.state=create)))
+
+		CTLSPEC NAME CTL941 := AG(((Test_cnt.obl0.state=inEffect) | (Test_cnt.pow7.state=unsTermination)) & (EF(Test_cnt.obl9.state=fulfillment)))
+
+		CTLSPEC NAME CTL942 := ((Test_cnt.obl2.state=suspension) -> (Test_cnt.obl8.state=unsTermination)) & (EG(EF(Test_cnt.obl3.state=fulfillment)))
+
+		CTLSPEC NAME CTL943 := !(AF((Test_cnt.pow1.state=sTermination) -> (EF(!(Test_cnt.obl7.state=suspension)))))
+
+		CTLSPEC NAME CTL944 := !((Test_cnt.obl0.state=fulfillment) & (Test_cnt.obl5.state=inEffect) & (AF(Test_cnt.obl7.state=violation)))
+
+		CTLSPEC NAME CTL945 := !((!(Test_cnt.obl3.state=discharge)) & ((Test_cnt.obl3.state=create) -> (Test_cnt.pow1.state=suspension)))
+
+		CTLSPEC NAME CTL946 := (Test_cnt.pow5.state=inEffect) & (AG(Test_cnt.obl12.state=discharge)) & (EG(Test_cnt.obl9.state=unsTermination))
+
+		CTLSPEC NAME CTL947 := (Test_cnt.obl4.state=inEffect) & (EG(!(Test_cnt.obl12.state=violation)))
+
+		CTLSPEC NAME CTL948 := !((Test_cnt.pow0.state=unsTermination) & (EG((Test_cnt.obl8.state=unsTermination) & (Test_cnt.pow4.state=sTermination))))
+
+		CTLSPEC NAME CTL949 := ((Test_cnt.obl9.state=violation) -> (!(EF(Test_cnt.pow3.state=sTermination)))) -> (Test_cnt.obl10.state=suspension)
+
+		CTLSPEC NAME CTL950 := (Test_cnt.pow6.state=inEffect) -> ((Test_cnt.obl5.state=fulfillment) & (Test_cnt.pow6.state=sTermination))
+
+		CTLSPEC NAME CTL951 := ((Test_cnt.obl7.state=inEffect) & (AG(Test_cnt.obl12.state=inEffect))) -> (AF(Test_cnt.pow5.state=unsTermination))
+
+		CTLSPEC NAME CTL952 := AF((Test_cnt.obl12.state=suspension) & ((Test_cnt.obl8.state=suspension) -> (!(Test_cnt.obl11.state=create))))
+
+		CTLSPEC NAME CTL953 := AF((Test_cnt.pow2.state=create) -> (AF(Test_cnt.pow4.state=unsTermination)))
+
+		CTLSPEC NAME CTL954 := (EG(Test_cnt.obl6.state=violation)) | ((Test_cnt.obl2.state=suspension) -> (AF(Test_cnt.pow1.state=create)))
+
+		CTLSPEC NAME CTL955 := ((Test_cnt.obl2.state=create) & (Test_cnt.obl3.state=inEffect) & (Test_cnt.obl3.state=suspension)) -> (Test_cnt.pow7.state=unsTermination)
+
+		CTLSPEC NAME CTL956 := (!(Test_cnt.pow5.state=sTermination)) | ((Test_cnt.pow2.state=suspension) & (AF(Test_cnt.obl5.state=discharge)))
+
+		CTLSPEC NAME CTL957 := (AF(Test_cnt.pow1.state=unsTermination)) & (AF((Test_cnt.obl4.state=violation) | (Test_cnt.pow2.state=sTermination)))
+
+		CTLSPEC NAME CTL958 := !((AF(Test_cnt.obl10.state=inEffect)) -> (EF(!(Test_cnt.obl7.state=unsTermination))))
+
+		CTLSPEC NAME CTL959 := EF((!(Test_cnt.obl0.state=suspension)) & (Test_cnt.obl2.state=inEffect))
+
+		CTLSPEC NAME CTL960 := AF((EG(Test_cnt.pow3.state=inEffect)) | (EF(!(Test_cnt.pow7.state=create))))
+
+		CTLSPEC NAME CTL961 := AG(AF((Test_cnt.obl8.state=unsTermination) & (EG(EF(Test_cnt.obl11.state=inEffect)))))
+
+		CTLSPEC NAME CTL962 := !((!(Test_cnt.pow0.state=suspension)) & (AF(Test_cnt.pow2.state=sTermination)))
+
+		CTLSPEC NAME CTL963 := EG(((Test_cnt.obl1.state=violation) & (Test_cnt.obl7.state=create)) -> (!(Test_cnt.pow2.state=unsTermination)))
+
+		CTLSPEC NAME CTL964 := ((Test_cnt.pow5.state=create) & (Test_cnt.pow6.state=inEffect)) | (EF(EG(Test_cnt.obl6.state=suspension)))
+
+		CTLSPEC NAME CTL965 := (!(Test_cnt.pow7.state=inEffect)) -> (AG(AF(!(Test_cnt.pow6.state=inEffect))))
+
+		CTLSPEC NAME CTL966 := !((EF(Test_cnt.obl0.state=create)) & (AF(!(Test_cnt.pow7.state=unsTermination))))
+
+		CTLSPEC NAME CTL967 := (Test_cnt.pow4.state=sTermination) | (AF(EG(AF(Test_cnt.obl4.state=unsTermination))))
+
+		CTLSPEC NAME CTL968 := ((Test_cnt.obl1.state=fulfillment) | (AG(Test_cnt.obl10.state=discharge))) -> (AG(Test_cnt.pow2.state=suspension))
+
+		CTLSPEC NAME CTL969 := (Test_cnt.obl12.state=fulfillment) & ((Test_cnt.obl4.state=create) | ((Test_cnt.obl6.state=fulfillment) & (Test_cnt.obl12.state=fulfillment)))
+
+		CTLSPEC NAME CTL970 := AG(EF((Test_cnt.obl1.state=discharge) & (AG(Test_cnt.obl7.state=fulfillment))))
+
+		CTLSPEC NAME CTL971 := !((!(Test_cnt.obl3.state=violation)) & (Test_cnt.obl9.state=discharge) & (Test_cnt.pow3.state=create))
+
+		CTLSPEC NAME CTL972 := (Test_cnt.obl0.state=violation) | (Test_cnt.obl9.state=inEffect) | (EG(Test_cnt.obl10.state=unsTermination))
+
+		CTLSPEC NAME CTL973 := EF((Test_cnt.obl5.state=suspension) & (EG(Test_cnt.obl3.state=inEffect)))
+
+		CTLSPEC NAME CTL974 := EF(!((!(EG(Test_cnt.obl0.state=inEffect))) -> (Test_cnt.obl2.state=create)))
+
+		CTLSPEC NAME CTL975 := (Test_cnt.obl0.state=discharge) | (!(Test_cnt.obl9.state=unsTermination)) | (AG(Test_cnt.obl7.state=violation))
+
+		CTLSPEC NAME CTL976 := !((EF(Test_cnt.pow4.state=sTermination)) -> (AF(Test_cnt.obl5.state=inEffect)))
+
+		CTLSPEC NAME CTL977 := !(((Test_cnt.pow0.state=inEffect) -> (Test_cnt.obl8.state=discharge)) & (AG(Test_cnt.pow0.state=create)))
+
+		CTLSPEC NAME CTL978 := (!(Test_cnt.obl3.state=suspension)) & (Test_cnt.pow4.state=sTermination) & (AF(Test_cnt.pow0.state=sTermination))
+
+		CTLSPEC NAME CTL979 := AG((Test_cnt.obl10.state=fulfillment) & ((!(Test_cnt.obl3.state=suspension)) | (Test_cnt.obl8.state=unsTermination)))
+
+		CTLSPEC NAME CTL980 := (Test_cnt.obl6.state=discharge) | (Test_cnt.pow4.state=sTermination) | ((Test_cnt.obl1.state=unsTermination) & (Test_cnt.pow2.state=create))
+
+		CTLSPEC NAME CTL981 := (Test_cnt.obl1.state=create) & (AF(Test_cnt.obl8.state=discharge)) & (AF(Test_cnt.obl3.state=inEffect))
+
+		CTLSPEC NAME CTL982 := ((Test_cnt.obl4.state=inEffect) -> (Test_cnt.pow6.state=sTermination)) | (EG(!(Test_cnt.obl10.state=suspension)))
+
+		CTLSPEC NAME CTL983 := (Test_cnt.obl4.state=fulfillment) & (AG((Test_cnt.obl9.state=unsTermination) -> (AF(Test_cnt.obl2.state=inEffect))))
+
+		CTLSPEC NAME CTL984 := !((Test_cnt.obl4.state=inEffect) & (Test_cnt.obl6.state=suspension) & (!(Test_cnt.pow2.state=create)))
+
+		CTLSPEC NAME CTL985 := EF(EG((Test_cnt.pow2.state=inEffect) & (EF(EG(Test_cnt.pow4.state=inEffect)))))
+
+		CTLSPEC NAME CTL986 := EF(((Test_cnt.obl4.state=fulfillment) -> (Test_cnt.pow1.state=inEffect)) & (EF(Test_cnt.obl4.state=suspension)))
+
+		CTLSPEC NAME CTL987 := (EF(Test_cnt.obl0.state=unsTermination)) | (EF(AG(EF(Test_cnt.obl10.state=fulfillment))))
+
+		CTLSPEC NAME CTL988 := EF((Test_cnt.pow0.state=create) | (EF(Test_cnt.obl9.state=violation)))
+
+		CTLSPEC NAME CTL989 := ((Test_cnt.pow0.state=suspension) -> (Test_cnt.obl6.state=fulfillment)) & (AF(!(Test_cnt.obl11.state=unsTermination)))
+
+		CTLSPEC NAME CTL990 := (Test_cnt.pow6.state=inEffect) & (AF((Test_cnt.pow0.state=inEffect) & (AG(Test_cnt.obl5.state=create))))
+
+		CTLSPEC NAME CTL991 := EF(!((!(Test_cnt.obl4.state=create)) & (Test_cnt.pow1.state=suspension)))
+
+		CTLSPEC NAME CTL992 := AG(AF((EF(Test_cnt.obl1.state=unsTermination)) & (AG(Test_cnt.obl9.state=violation))))
+
+		CTLSPEC NAME CTL993 := !((AG(Test_cnt.obl3.state=create)) & (AG(Test_cnt.pow4.state=create)))
+
+		CTLSPEC NAME CTL994 := !((Test_cnt.obl6.state=violation) -> (EF(!(AG(Test_cnt.obl6.state=discharge)))))
+
+		CTLSPEC NAME CTL995 := (AF(Test_cnt.pow7.state=suspension)) & (AF((Test_cnt.obl9.state=discharge) & (Test_cnt.pow3.state=inEffect)))
+
+		CTLSPEC NAME CTL996 := !(((Test_cnt.pow5.state=inEffect) -> (Test_cnt.obl5.state=inEffect)) -> (AG(Test_cnt.pow4.state=suspension)))
+
+		CTLSPEC NAME CTL997 := EG((Test_cnt.obl11.state=unsTermination) | (AF((Test_cnt.obl11.state=fulfillment) -> (Test_cnt.pow4.state=suspension))))
+
+		CTLSPEC NAME CTL998 := (Test_cnt.obl8.state=discharge) -> ((Test_cnt.obl4.state=fulfillment) -> (EG(Test_cnt.obl3.state=create)))
+
+		CTLSPEC NAME CTL999 := EF((Test_cnt.obl0.state=unsTermination) -> (EF(Test_cnt.obl9.state=unsTermination)))
+
+		CTLSPEC NAME CTL1000 := ((!(Test_cnt.pow6.state=suspension)) -> (Test_cnt.obl3.state=fulfillment)) & (AF(Test_cnt.obl2.state=create))
+
+		
+
+
