@@ -1,0 +1,1 @@
+read_model -i result/TestContract8o8p14od22pd.smv; flatten_hierarchy; encode_variables -i result/TestContract8o8p14od22pd.ord; time; go; time; check_ltlspec -n LTL0; time; quit;
