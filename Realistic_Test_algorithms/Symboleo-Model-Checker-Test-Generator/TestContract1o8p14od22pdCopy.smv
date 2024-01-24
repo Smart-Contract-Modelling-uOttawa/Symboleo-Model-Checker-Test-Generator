@@ -1,0 +1,537 @@
+MODULE Timer(start)
+ VAR active1  : boolean;
+     expired1 : boolean;
+ ASSIGN
+   init(active1) := start;
+   next(active1) := (active1 | start) ? TRUE : active1;
+   init(expired1) :=  active1 ? {TRUE,FALSE} : FALSE;
+   next(expired1) :=  case
+           active1 & !expired1 : {TRUE,FALSE};
+           expired1           : TRUE;
+           TRUE              : FALSE;
+       esac;
+
+MODULE Event(start)
+ DEFINE 
+ 		_active := (state = active);
+ 		_inactive := (state = inactive);
+        _happened := (state = happened);
+        _expired  := (state = expired);
+ VAR triggered : boolean;
+         timer : Timer(start & !_happened & !_expired);
+         state : {inactive, active, happened, expired};
+		 performer	: {"Customer", "Store"};
+
+ ASSIGN
+	next(performer)	:= case
+		state=active & start	: {"Customer", "Store"};
+		TRUE	 				: performer;
+	esac;
+ ASSIGN
+  init(triggered) := FALSE;
+  next(triggered) := (state=active & start) ? {FALSE,TRUE} : FALSE;
+  init(state)     := inactive;
+  next(state)     := case
+    state=inactive & start                          : active;
+    state=active & start & triggered &
+							timer.active1 : happened;
+	state=active & start & timer.expired1 : expired;
+    TRUE                                            : state;
+  esac;
+
+--------------------------------------------------------------------------------------
+-- 'name' is party name
+-- 'removeL/R/P' releases liability, righHolder or performer position of a party
+-- 'addL/R/P' adds liability, righHolder or performer position to a party
+--------------------------------------------------------------------------------------
+MODULE Party(norm, name, removeL, addL, removeR, addR, removeP, addP)
+  DEFINE
+	_name 			:= name;
+	_norm			:= norm;
+	_is_performer	:= p_state=P;
+	_is_liable		:= l_state=L;
+	_is_rightHolder	:= r_state=R;
+
+  VAR
+	l_state	: {Init, L};
+	r_state	: {Init, R};
+	p_state	: {Init, P};
+
+  ASSIGN
+	init(l_state) := Init;
+	next(l_state)	:= case
+		l_state=Init & addL	: L;
+		l_state=L &removeL	: Init;
+		TRUE				: l_state;
+	esac;
+
+  ASSIGN
+	init(r_state) := Init;
+	next(r_state)	:= case
+		r_state=Init & addR	: R;
+		r_state=R & removeR : Init;
+		TRUE				: r_state;
+	esac;
+
+  ASSIGN
+	init(p_state) := Init;
+	next(p_state)	:= case
+		p_state=Init & addP : P;
+		p_state=P & removeP	: Init;
+		TRUE				: p_state;
+	esac;
+
+  INVAR
+	!(addL & removeL) &
+	!(addR & removeR) &
+	!(addP & removeP) &
+	!(_is_rightHolder & _is_liable);
+
+--------------------------------------------------------------------------------------
+-- 'cnt_in_effect'    indicates if the contract is in inEffect state
+-- 'power_suspended'  indicates if a power suspends the obligation
+-- 'cnt_suspended'    indicates if the contract suspension suspends the obligation
+-- 'power_resumed'    indicates if a power resumption resumes the obligation
+-- 'cnt_resumed'      indicates if the contract resumption resumes the obligation
+--------------------------------------------------------------------------------------
+MODULE Obligation(name, surviving, cnt_in_effect, cnt_untermination,
+                  fulfilled, triggered, violated, activated,
+				  expired1, power_suspended, cnt_suspended, terminated, power_resumed,
+				  cnt_resumed, discharged, antecedent)
+  DEFINE
+	_name 		:= name;
+	_surviving	:= surviving;
+	_suspended 	:= (power_suspended | (cnt_suspended & !surviving));
+	_active 	:= (state = inEffect | state = suspension);
+
+  VAR
+	state 		: {not_created, create, inEffect, suspension, discharge,
+				   fulfillment, violation, unsTermination};
+	sus_state	: {not_suspended, sus_by_contract, sus_by_power};
+
+  ASSIGN
+ --NEW: update axioms(surviving obligations are not suspended! informally mentioned)
+	init(sus_state) := not_suspended;
+	next(sus_state)	:= case
+		sus_state=not_suspended & !surviving & cnt_suspended 	: sus_by_contract;
+		sus_state=sus_by_contract & !surviving & cnt_resumed	: not_suspended;
+		sus_state=not_suspended & !surviving & power_suspended 	: sus_by_power;
+		sus_state=sus_by_power & !surviving & power_resumed		: not_suspended;
+		TRUE													: sus_state;
+	esac;
+
+  ASSIGN
+    init(state) := not_created;
+    next(state) := case
+		cnt_in_effect & state=not_created   & triggered & !antecedent : create;
+		cnt_in_effect & state=not_created   & triggered & antecedent  : inEffect;
+		cnt_in_effect & state=create        & antecedent              : inEffect;
+		cnt_in_effect & state=create        & (expired1 | discharged)  : discharge;
+		cnt_in_effect & state=inEffect      & fulfilled               : fulfillment;
+		cnt_in_effect & state=inEffect      & _suspended              : suspension;
+		cnt_in_effect & state=inEffect      & violated                : violation;
+		cnt_in_effect & _active            	& terminated              : unsTermination;
+		cnt_untermination & !surviving  	& _active           	  : unsTermination;
+		sus_state=sus_by_contract & state=suspension  & cnt_resumed   : inEffect;
+		sus_state=sus_by_power	  & state=suspension  & power_resumed   : inEffect;
+		TRUE                                                          : state;
+  esac;
+
+--------------------------------------------------------------------------------------
+-- 'cnt_in_effect'   indicates if the contract is in inEffect state
+-- 'power_suspended' indicates if a power suspends the power
+-- 'cnt_suspended'   indicates if the contract suspension suspends the power
+-- 'power_resumed'   indicates if a power resumption resumes the power
+-- 'cnt_resumed'     indicates if the contract resumption resumes the power
+--------------------------------------------------------------------------------------
+MODULE Power(name, cnt_in_effect, triggered, activated, expired1, power_suspended, cnt_suspended,
+       	     terminated, exerted, power_resumed, cnt_resumed, antecedent)
+  DEFINE
+	_name		 := name;
+	_active 	 := (state = inEffect | state = suspension);
+	_suspended 	 := (power_suspended | cnt_suspended);
+
+  VAR
+	state 		: {not_created, create, inEffect, suspension, sTermination, unsTermination};
+	sus_state	: {not_suspended, sus_by_contract, sus_by_power};
+
+  ASSIGN
+	init(sus_state) := not_suspended;
+	next(sus_state)	:= case
+		sus_state=not_suspended & cnt_suspended 	: sus_by_contract;
+		sus_state=sus_by_contract & cnt_resumed		: not_suspended;
+		sus_state=not_suspended & power_suspended 	: sus_by_power;
+		sus_state=sus_by_power & power_resumed		: not_suspended;
+		TRUE										: sus_state;
+	esac;
+
+  ASSIGN
+   init(state) := not_created;
+   next(state) := case
+     cnt_in_effect & state = not_created 	& triggered & !antecedent : create;
+     cnt_in_effect & state = not_created 	& triggered & antecedent  : inEffect;
+     cnt_in_effect & state = create      	& antecedent              : inEffect;
+     cnt_in_effect & state = create      	& expired1                : unsTermination;
+     cnt_in_effect & state = inEffect    	& exerted                 : sTermination;
+     cnt_in_effect & state = inEffect   	& _suspended              : suspension;
+     cnt_in_effect & state = inEffect    	& expired1                : unsTermination;
+	 cnt_in_effect & _active  			 	& terminated              : unsTermination;
+
+	 sus_state=sus_by_contract & state=suspension  & cnt_resumed 	  : inEffect;
+	 sus_state=sus_by_power	   & state=suspension  & power_resumed      : inEffect;
+
+     TRUE                                          				   	  : state;
+   esac;
+
+--------------------------------------------------------------------------------------
+-- 'assigned_party'				 indicates if a party is assigned to a role
+-- 'revoked_party'				 indicates if a party is unassigned from a role
+-- 'fulfilled_active_obligation' indicates if all active obligations are fulfilled
+--------------------------------------------------------------------------------------
+MODULE Contract(triggered, activated, terminated, suspended, resumed,
+				revoked_party, assigned_party, fulfilled_active_obligation)
+  DEFINE
+	_active 	 := (state = unassign | state = inEffect | state = suspension);
+	_termination := (state = sTermination | state = unsTermination);
+
+	-- obligations/powers' status changes once the contract goes to inEffect state
+	_o_activated := (state = form & activated) |
+						(state = suspension & resumed) |
+						(state = unassign & assigned_party) |
+						(state = inEffect);
+
+  VAR
+	state 		 : { not_created, form, inEffect, suspension, unassign, sTermination, unsTermination};
+
+  ASSIGN
+    init(state) := not_created;
+    next(state) := case
+		state = not_created & triggered  					: form;
+		state = form        & activated  					: inEffect;
+		state = inEffect    & fulfilled_active_obligation  	: sTermination;
+		state = inEffect    & suspended  					: suspension;
+		state = inEffect    & revoked_party  				: unassign;
+		state = inEffect    & terminated 					: unsTermination;
+		state = suspension  & resumed    					: inEffect;
+		state = suspension  & terminated 					: unsTermination;
+		state = unassign    & assigned_party 				: inEffect;
+		state = unassign    & terminated 					: unsTermination;
+		TRUE                             					: state;
+    esac;
+
+--------------------------------------------------------------------------------------
+-- CONTRACT INDEPENDENT CONCEPTS
+--------------------------------------------------------------------------------------
+MODULE Role(party)
+ DEFINE _party := party;
+
+MODULE Asset(owner)
+ DEFINE _owner := owner;
+ 
+MODULE Situation(proposition)
+ DEFINE _holds := proposition;
+ 
+-- WhappensBefore(e,t), ShappensBefore(e,t) are HappensAfter(e,t) are simulated as Happens(e,t) 		 
+MODULE WhappensBefore(event, time)
+ DEFINE _false  := (state = not_happened);
+	    _true := (state = happened);
+ VAR state: {not_happened, happened};
+	ASSIGN
+	    init(state) := not_happened;
+	    next(state) := case
+			state = not_happened & event.event._active & next(event.event._happened) : happened;
+			TRUE : state;
+		esac;
+		
+MODULE ShappensBefore(event, time)
+ DEFINE _false  := (state = not_happened);
+	    _true := (state = happened);
+ VAR state: {not_happened, happened};
+	ASSIGN
+	    init(state) := not_happened;
+	    next(state) := case
+			state = not_happened & event.event._active & next(event.event._happened) : happened;
+			TRUE : state;
+		esac;
+
+MODULE HappensAfter(event, time)
+ DEFINE _false  := (state = not_happened);
+	    _true := (state = happened);
+ VAR state: {not_happened, happened};
+	ASSIGN
+	    init(state) := not_happened;
+	    next(state) := case
+			state = not_happened & event.event._active & next(event.event._happened) : happened;
+			TRUE : state;
+		esac;
+			
+MODULE WhappensBeforeE(event1, event2)
+ DEFINE _false  := (state = not_happened);
+	    _true := (state = happened);
+ VAR state: {not_happened, happened};
+	ASSIGN
+	    init(state) := not_happened;
+	    next(state) := case
+			state = not_happened & event1.event._active & next(event1.event._happened) & !(next(event2_happened)) : happened;
+			TRUE : state;
+		esac;
+	
+MODULE ShappensBeforeE(event1, event2)
+ DEFINE _false  := (state = not_happened);
+        _true 	:= (state = ev1_ev2_happened);
+ VAR state: {not_happened, ev1_happened, ev1_ev2_happened};
+ 	ASSIGN
+   		init(state) := not_happened;
+    	next(state) := case
+			state = not_happened & event1.event._active & next(event1.event._happened) & !(next(event2.event._happened)) : ev1_happened;
+			state = ev1_happened & event2.event._active & next(event2.event._happened) : ev1_ev2_happened;
+			TRUE : state;
+ esac;
+	
+MODULE HappensWithin(event, situation)
+ DEFINE _false  := (state = not_happened);
+        _true 	:= (state = happened);
+ VAR state: {happened, not_happened};
+ 	ASSIGN
+    	init(state) := not_happened;
+    	next(state) := case
+			state = not_happened & event.event._active & next(event.event._happened) & situation._holds : happened;
+			TRUE : state;
+		esac;	
+
+MODULE HappensAfterE(event1, event2)
+ DEFINE _false  := (state = not_happened);
+        _true := (state = ev2_ev1_happened);
+
+ VAR state: {not_happened, ev2_happened, ev2_ev1_happened};
+ 	ASSIGN
+    	init(state) := not_happened;
+    	next(state) := case
+			state = not_happened & !(next(event1_happened)) & event2.event._active & next(event2.event._happened) : ev2_happened;
+			state = ev2_happened & event1.event._active & next(event1.event._happened) : ev2_ev1_happened;
+			TRUE : state;	
+	esac;
+
+--------------------------------------------------------------------------------------
+-- CONTRACT DEPENDENT CONCEPTS
+--------------------------------------------------------------------------------------
+
+MODULE Store(party)
+	 VAR
+			role : Role(party);
+
+MODULE Customer(party)
+	 VAR
+			role : Role(party);
+
+
+
+MODULE DEvent(start)
+	 VAR
+		event : Event(start);
+
+
+--------------------------------------------------------------------------------------
+-- CONTRACT
+--------------------------------------------------------------------------------------
+MODULE TestContract ()
+
+	CONSTANTS
+	"obld","obl0","pow0","pow1","pow2","pow3","pow4","pow5","pow6","pow7";
+	
+	VAR
+		pow0_exerted : Event(pow0.state=inEffect);
+		
+		pow1_exerted : Event(pow1.state=inEffect);
+		
+		pow2_exerted : Event(pow2.state=inEffect);
+		
+		pow3_exerted : Event(pow3.state=inEffect);
+		
+		pow4_exerted : Event(pow4.state=inEffect);
+		
+		pow5_exerted : Event(pow5.state=inEffect);
+		
+		pow6_exerted : Event(pow6.state=inEffect);
+		
+		pow7_exerted : Event(pow7.state=inEffect);
+		
+		obl0cons : DEvent(obl0.state=inEffect);
+		
+		obl0trig : DEvent(cnt.state=inEffect);
+		
+		pow0trig : DEvent(cnt.state=inEffect);
+		
+		pow1trig : DEvent(cnt.state=inEffect);
+		
+		pow2trig : DEvent(cnt.state=inEffect);
+		
+		pow3trig : DEvent(cnt.state=inEffect);
+		
+		pow4trig : DEvent(cnt.state=inEffect);
+		
+		pow6trig : DEvent(cnt.state=inEffect);
+		
+		pow7trig : DEvent(cnt.state=inEffect);
+		
+		
+		cnt_succ_Termination : Situation((cnt.state=inEffect)
+		& !(obld._active)
+		& !(obl0._active)
+		);
+		
+		--------------
+		-- SITUATIONS
+		--------------
+		pow0_exertion : Situation ((pow0._active & pow0_exerted._happened & pow0_exerted.performer = pow0_creditor._name & pow0_creditor._is_performer ));
+		
+		pow1_exertion : Situation ((pow1._active & pow1_exerted._happened & pow1_exerted.performer = pow1_creditor._name & pow1_creditor._is_performer ));
+		
+		pow2_exertion : Situation ((pow2._active & pow2_exerted._happened & pow2_exerted.performer = pow2_creditor._name & pow2_creditor._is_performer ));
+		
+		pow3_exertion : Situation ((pow3._active & pow3_exerted._happened & pow3_exerted.performer = pow3_creditor._name & pow3_creditor._is_performer ));
+		
+		pow4_exertion : Situation ((pow4._active & pow4_exerted._happened & pow4_exerted.performer = pow4_creditor._name & pow4_creditor._is_performer ));
+		
+		pow5_exertion : Situation ((pow5._active & pow5_exerted._happened & pow5_exerted.performer = pow5_creditor._name & pow5_creditor._is_performer ));
+		
+		pow6_exertion : Situation ((pow6._active & pow6_exerted._happened & pow6_exerted.performer = pow6_creditor._name & pow6_creditor._is_performer ));
+		
+		pow7_exertion : Situation ((pow7._active & pow7_exerted._happened & pow7_exerted.performer = pow7_creditor._name & pow7_creditor._is_performer ));
+		
+		obld_suspension : Situation ((pow0._active & pow0_exerted._happened & pow0_exerted.performer = pow0_creditor._name & pow0_creditor._is_performer )|(pow1._active & pow1_exerted._happened & pow1_exerted.performer = pow1_creditor._name & pow1_creditor._is_performer )|(pow2._active & pow2_exerted._happened & pow2_exerted.performer = pow2_creditor._name & pow2_creditor._is_performer )|(pow3._active & pow3_exerted._happened & pow3_exerted.performer = pow3_creditor._name & pow3_creditor._is_performer )|(pow4._active & pow4_exerted._happened & pow4_exerted.performer = pow4_creditor._name & pow4_creditor._is_performer )|(pow5._active & pow5_exerted._happened & pow5_exerted.performer = pow5_creditor._name & pow5_creditor._is_performer )|(pow6._active & pow6_exerted._happened & pow6_exerted.performer = pow6_creditor._name & pow6_creditor._is_performer )|(pow7._active & pow7_exerted._happened & pow7_exerted.performer = pow7_creditor._name & pow7_creditor._is_performer ));
+		
+		obld_violated : Situation (FALSE);
+		
+		obl0_violated : Situation ((obl0cons.event._expired | (obl0cons.event._happened & !(obl0cons.event.performer = obl0_debtor._name & obl0_debtor._is_performer))));
+		
+		obld_expired : Situation (FALSE);
+		
+		obl0_expired : Situation (FALSE);
+		
+		pow0_expired : Situation (FALSE);
+		
+		pow1_expired : Situation (FALSE);
+		
+		pow2_expired : Situation (FALSE);
+		
+		pow3_expired : Situation (FALSE);
+		
+		pow4_expired : Situation (FALSE);
+		
+		pow5_expired : Situation (FALSE);
+		
+		pow6_expired : Situation (FALSE);
+		
+		pow7_expired : Situation (FALSE);
+		
+		obld_consequent : Situation (TRUE);
+		
+		obl0_consequent : Situation ((obl0cons.event._happened & obl0cons.event.performer = obl0_debtor._name & obl0_debtor._is_performer));
+		
+		obl0_trigger : Situation ((obl0trig.event._happened));
+		
+		pow0_trigger : Situation ((pow0trig.event._happened));
+		
+		pow1_trigger : Situation ((pow1trig.event._happened));
+		
+		pow2_trigger : Situation ((pow2trig.event._happened));
+		
+		pow3_trigger : Situation ((pow3trig.event._happened));
+		
+		pow4_trigger : Situation ((pow4trig.event._happened));
+		
+		pow5_trigger : Situation (obl0.state=violation);
+		
+		pow6_trigger : Situation ((pow6trig.event._happened));
+		
+		pow7_trigger : Situation ((pow7trig.event._happened));
+		
+		
+		cnt: Contract(TRUE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, cnt_succ_Termination._holds);
+			
+		--------------
+		-- OBLIGATIONS
+		--------------		
+		obld : Obligation("obld", FALSE, cnt._o_activated, FALSE, obld_consequent._holds, TRUE, obld_violated._holds, FALSE, obld_expired._holds, obld_suspension._holds, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		obl0 : Obligation("obl0", FALSE, cnt._o_activated, FALSE, obl0_consequent._holds, obl0_trigger._holds, obl0_violated._holds, FALSE, obl0_expired._holds, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE);
+				
+		
+		--------------
+		-- POWERS
+		--------------
+		pow0 : Power("pow0", cnt._o_activated, pow0_trigger._holds, FALSE, pow0_expired._holds, FALSE, FALSE, FALSE, pow0_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow1 : Power("pow1", cnt._o_activated, pow1_trigger._holds, FALSE, pow1_expired._holds, FALSE, FALSE, FALSE, pow1_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow2 : Power("pow2", cnt._o_activated, pow2_trigger._holds, FALSE, pow2_expired._holds, FALSE, FALSE, FALSE, pow2_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow3 : Power("pow3", cnt._o_activated, pow3_trigger._holds, FALSE, pow3_expired._holds, FALSE, FALSE, FALSE, pow3_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow4 : Power("pow4", cnt._o_activated, pow4_trigger._holds, FALSE, pow4_expired._holds, FALSE, FALSE, FALSE, pow4_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow5 : Power("pow5", cnt._o_activated, pow5_trigger._holds, FALSE, pow5_expired._holds, FALSE, FALSE, FALSE, pow5_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow6 : Power("pow6", cnt._o_activated, pow6_trigger._holds, FALSE, pow6_expired._holds, FALSE, FALSE, FALSE, pow6_exertion._holds, FALSE, FALSE, TRUE);
+		
+		pow7 : Power("pow7", cnt._o_activated, pow7_trigger._holds, FALSE, pow7_expired._holds, FALSE, FALSE, FALSE, pow7_exertion._holds, FALSE, FALSE, TRUE);
+		
+		
+		--------------
+		-- PARTIES
+		--------------
+		obld_debtor : Party(obld._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obld_creditor : Party(obld._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		obl0_debtor : Party(obl0._name, store.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		obl0_creditor : Party(obl0._name, cust.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		
+		pow0_debtor : Party(pow0._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow0_creditor : Party(pow0._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow1_debtor : Party(pow1._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow1_creditor : Party(pow1._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow2_debtor : Party(pow2._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow2_creditor : Party(pow2._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow3_debtor : Party(pow3._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow3_creditor : Party(pow3._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow4_debtor : Party(pow4._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow4_creditor : Party(pow4._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow5_debtor : Party(pow5._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow5_creditor : Party(pow5._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow6_debtor : Party(pow6._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow6_creditor : Party(pow6._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		pow7_debtor : Party(pow7._name, cust.role._party, FALSE, TRUE, FALSE, FALSE, FALSE, TRUE);
+		pow7_creditor : Party(pow7._name, store.role._party, FALSE, FALSE, FALSE, TRUE, FALSE, FALSE);
+		
+		
+		-----------------------
+		-- IMPLICIT CONSTRAINTS
+		-----------------------
+		
+		--------------
+		-- CONSTRAINTS
+		--------------
+		
+		--------------
+		-- Assignment
+		--------------
+
+--------------------------------------------------------------------
+---Main Module
+--------------------------------------------------------------------
+MODULE main
+
+VAR
+ cust: Customer("Customer");
+ store: Store("Store");
+ 
+ Test_cnt : TestContract(cust, store);
