@@ -25,13 +25,14 @@ Spot is a tool that randomly generates LTL properties. Follow <a href="https://s
   
   Find outputs in 'result' folder.
   
-  To generate reachable states of nuXmv modules:
+  ## To generate reachable states of nuXmv modules:
   
-  change the name of file test.java to test.java1
+  - change the name of file test.java to test.java1
 
-  change the name of file Test_CreatOrdOnly.java1 to test.java and follow the previous steps.
-  To verify LTL and CTL properties:
+  - change the name of file Test_CreatOrdOnly.java1 to test.java and follow the previous steps.
+ 
+  ## To verify LTL and CTL properties:
   
-  change the name of file test.java1 to test.java
-  Follow the steps inside the file to select the suitable algorithm
-  follow the above steps.
+  - change the name of file test.java1 to test.java
+  - Follow the steps inside the file to select the suitable algorithm
+  - follow the above steps.
